@@ -1,7 +1,7 @@
 # ML assessment. Candidate number: 492841
 
 # Set your working directory
-setwd("C:/Users/lukeb/Downloads/LSHTM/TERM 2/Machine Learning/ML assessment")
+setwd("C:/Users/lukeb/Downloads/LSHTM/TERM 2/Machine Learning/ML assessment/492841_ML")
 
 # Import relevant libraries
 library(tidyverse)
@@ -22,7 +22,7 @@ head(data, 5)
 
 
 
-
+# hello
 
 
 # ------------------------------------
