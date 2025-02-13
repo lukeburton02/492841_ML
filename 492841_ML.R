@@ -11,7 +11,7 @@ library(ggplot2)
 library(glmnet)
 library(mboost)
 library(xgboost)
-library(caret)
+library(caret) # used for training, predicting, and pre-processing
 library(pROC)
 
 # Read in the dataset. Empty rows are ommitted by default
@@ -27,6 +27,10 @@ sum(is.na(dat)) # No missing values
 categorical_cols <- names(dat)[sapply(dat, function(x) is.character(x) | is.factor(x))]
 categorical_cols <- setdiff(categorical_cols, 'death')
 dat[categorical_cols] <- lapply(dat[categorical_cols], factor)
+
+# Convert the outcome to a factor for proper handling
+dat$death <- factor(dat$death, levels = c(0, 1), labels = c(0, 1))
+
 
 # ------------------------------------
 # Section 1: Exploratory data analysis
@@ -54,15 +58,27 @@ death_rate <- dat %>%
 
 ggplot(death_rate, aes(x = subtype, y = drate)) +
   geom_bar(stat = "identity", fill = "steelblue", color = "black") +
-  labs(x = "Stroke subtype", y = "Percentage Who Died (%)", title = "Death Rate by Stroke Subtype") +
-  theme_minimal()
+  labs(x = "Stroke Subtype", y = "Percentage Who Died (%)", title = "Death Rate by Stroke Subtype") +
+  theme_minimal() +
+  theme_bw()
 
 # ------------------------------------
 # Split into training + validation
 # ------------------------------------
 
+# we use createDataPartition to preserve the death distribution, reducing bias
+
+psamp <- .2 # use an 80-20 train-test split
+set.seed(22) # for reproducibility
+testind <- createDataPartition(y = dat$death, p = psamp)[[1]]
+
+# split data
+dattr <- dat[-testind,]
+datte <- dat[testind,]
 
 
+# note that we will not oversample on the validation dataset
+# this is to preserve the underlying low death rate of ~5%
 
 
 # ------------------------------------
@@ -84,19 +100,16 @@ ggplot(death_rate, aes(x = subtype, y = drate)) +
 # Convert the outcome to a factor, bearing in mind coefficients are halved under glmboost
 dat$death <- as.factor(dat$death) 
 l2boost <- glmboost(death ~ ., data=dat, family = Binomial())
-
 # Explore coefficient evolution
 boostcoefs <- coef(l2boost, aggregate = "cumsum") |> 
   do.call(what = rbind) |> t() 
 colnames(boostcoefs) <- names(coef(l2boost, aggregate = "cumsum"))
-
 # Increase iterations to identify optimal iterations
 l2boost2 <- glmboost(death ~ ., data=dat, control = boost_control(mstop = 1000))
 set.seed(2) # For reproducibility
 folds <- cv(model.weights(l2boost2), type = "kfold") # Define CV folds
 cvres2 <- cvrisk(l2boost2, folds) # Apply CV
 plot(cvres2)
-
 # Change the learning rate to 0.5
 l2boost3 <- glmboost(death ~ ., data = dat, control = boost_control(mstop = 1000, nu = .5))
 cvres3 <- cvrisk(l2boost3, folds) # Apply CV
@@ -106,24 +119,86 @@ plot(cvres3)
 
 
 
-# XGBoost - save this for later
+# XGBoost
 
-set.seed(42)  # For reproducibility
-# Ensure death is numeric (0,1)
-dat$death <- as.numeric(as.character(dat$death))  # Convert factor to numeric
+# Extract data as matrices
+#X <- model.matrix(death ~ . - 1, dattr)
+#Y <- dattr$death
 
-# Split into training and validation sets before encoding
-trainIndex <- createDataPartition(dat$death, p = 0.8, list = FALSE)
-trainData <- dat[trainIndex, ]
-validData <- dat[-trainIndex, ]
+# Try upsampling
+up_data <- upSample(x = dattr %>% select(-death), y = dattr$death) %>%
+  rename(death = Class)
 
-# One-hot encode categorical variables using model.matrix()
-train_matrix <- model.matrix(death ~ . -1, data = trainData)  # Remove intercept
-valid_matrix <- model.matrix(death ~ . -1, data = validData)
+X <- model.matrix(death ~ . - 1, up_data)
+Y <- factor(up_data$death, levels = c(0, 1), labels = c(0, 1))
 
-# Create XGBoost data matrices
-xgb_train <- xgb.DMatrix(data = train_matrix, label = trainData$death)
-xgb_valid <- xgb.DMatrix(data = valid_matrix, label = validData$death)
+# Convert to DMatrix - UPDATE NAME
+xgdata <- xgb.DMatrix(data = X, label = as.numeric(Y) - 1)
+
+# Tune the number of iterations
+set.seed(55)
+params <- list(objective = "binary:logistic", eval_metric = "auc",
+               scale_pos_weight = 10, # pay more attention to minority class to improve specificity
+               max_depth = 8,
+               min_child_weight = 8,
+               subsample = 0.8,
+               colsample_bytree = 0.8,
+               eta = 0.05, # control the learning rate
+               gamma = 2, # reduction required before a split is made
+               lambda = 1.5,
+               alpha = 0.7) # controls regularisation
+xgcv <- xgb.cv(data = xgdata, nrounds = 500, nfold = 10, verbose = F, params = params,
+               early_stopping_rounds = 50,
+               maximize = TRUE) # IMPROVE parameters later. Maximise AUC
+
+(auc_best <- max(xgcv$evaluation_log[,"test_auc_mean"])) # Best AUC
+(nrounds_best <- which.max(unlist(xgcv$evaluation_log[,"test_auc_mean"]))) # Step at which this was achieved
+
+plot(test_auc_mean ~ iter, data = xgcv$evaluation_log, col = "darkgreen", 
+     type = "b", pch = 16, ylab = "Test AUC", xlab = "Iteration") +
+  abline(v = nrounds_best, lty = 2)
+
+# Fit final model with best parameters
+xgbmod <- xgb.train(data = xgdata, nrounds = nrounds_best, params = params)
+
+
+# Determine predictive accuracy
+Xte <- model.matrix(death ~ . - 1, datte)
+Yte <- datte$death
+probxgb <- predict(xgbmod, Xte)
+predxgb <- factor(probxgb > 0.5, levels = c("FALSE", "TRUE"), labels = c(0, 1))
+
+# Confusion Matrix
+conf_matrix <- confusionMatrix(predxgb, as.factor(Yte))
+print(conf_matrix)
+
+# Accuracy
+accuracy <- sum(predxgb == Yte) / length(Yte)
+cat("Accuracy: ", accuracy, "\n")
+
+# ROC Curve and AUC Calculation
+roc_curve <- roc(Yte, probxgb)
+plot(roc_curve, col = "blue", main = paste("ROC Curve (AUC =", round(auc(roc_curve), 2), ")"))
+
+
+# Specificity and Sensitivity
+sensitivity <- conf_matrix$byClass["Sensitivity"]
+specificity <- conf_matrix$byClass["Specificity"]
+cat("Sensitivity: ", sensitivity, "\n")
+cat("Specificity: ", specificity, "\n")
+
+
+
+
+
+
+
+
+
+
+
+
+# Use a more developed parameter method
 
 # Define XGBoost parameters
 params <- list(
@@ -146,20 +221,6 @@ xgb_model <- xgb.train(
   verbose = 1
 )
 
-# Get probability predictions
-pred_probs <- predict(xgb_model, newdata = xgb_valid)
-
-# Convert probabilities to binary predictions (threshold = 0.5)
-pred_labels <- ifelse(pred_probs > 0.5, 1, 0)
-
-# Confusion Matrix & Performance Metrics
-conf_matrix <- confusionMatrix(as.factor(pred_labels), as.factor(validData$death))
-print(conf_matrix)
-
-# ROC Curve & AUC Score
-roc_curve <- roc(validData$death, pred_probs)
-print(auc(roc_curve))  # AUC score
-plot(roc_curve, col = "blue", main = "ROC Curve for XGBoost Model")
 
 
 
