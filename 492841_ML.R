@@ -139,7 +139,7 @@ xgdata <- xgb.DMatrix(data = X, label = as.numeric(Y) - 1)
 set.seed(55)
 params <- list(objective = "binary:logistic", eval_metric = "auc",
                scale_pos_weight = 10, # pay more attention to minority class to improve specificity
-               max_depth = 8,
+               max_depth = 6,
                min_child_weight = 8,
                subsample = 0.8,
                colsample_bytree = 0.8,
@@ -147,7 +147,7 @@ params <- list(objective = "binary:logistic", eval_metric = "auc",
                gamma = 2, # reduction required before a split is made
                lambda = 1.5,
                alpha = 0.7) # controls regularisation
-xgcv <- xgb.cv(data = xgdata, nrounds = 500, nfold = 10, verbose = F, params = params,
+xgcv <- xgb.cv(data = xgdata, nrounds = 300, nfold = 10, verbose = F, params = params,
                early_stopping_rounds = 50,
                maximize = TRUE) # IMPROVE parameters later. Maximise AUC
 
