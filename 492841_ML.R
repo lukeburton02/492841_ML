@@ -13,6 +13,10 @@ library(mboost)
 library(xgboost)
 library(caret) # used for training, predicting, and pre-processing
 library(pROC)
+library(ggcorrplot)
+install.packages("GGally") # remove if unused
+library(GGally)
+library(gridExtra)
 
 # Read in the dataset. Empty rows are ommitted by default
 dat <- read.csv("assignment2025.csv")
@@ -61,6 +65,52 @@ ggplot(death_rate, aes(x = subtype, y = drate)) +
   labs(x = "Stroke Subtype", y = "Percentage Who Died (%)", title = "Death Rate by Stroke Subtype") +
   theme_minimal() +
   theme_bw()
+
+
+# 2. Outcome variable distribution (Bar plot)
+ggplot(dat, aes(x = death)) +
+  geom_bar(fill = "blue") +
+  labs(title = "Death Outcome Distribution", x = "Death (0 = Survived, 1 = Died)", y = "Count")
+
+# 3. Boxplots for numeric variables by death outcome
+p1 <- ggplot(dat, aes(x = death, y = delay, fill = death)) +
+  geom_boxplot() + labs(title = "Delay Time by Death Outcome")
+
+p2 <- ggplot(dat, aes(x = death, y = age, fill = death)) +
+  geom_boxplot() + labs(title = "Age by Death Outcome")
+
+p3 <- ggplot(dat, aes(x = death, y = sbp, fill = death)) +
+  geom_boxplot() + labs(title = "Systolic BP by Death Outcome")
+
+grid.arrange(p1, p2, p3, ncol = 2)
+
+# 4. Bar plots for categorical variables by death outcome
+categorical_vars <- setdiff(categorical_cols, "death")
+
+p_list_cat <- lapply(categorical_vars, function(var) {
+  ggplot(dat, aes(x = .data[[var]], fill = death)) +
+    geom_bar(position = "fill") +
+    labs(title = paste("Proportion of", var, "by Death Outcome"), y = "Proportion")
+})
+do.call(grid.arrange, c(p_list_cat, ncol = 2))
+
+# 5. Correlation plot for numeric variables
+numeric_cols <- c("delay", "age", "sbp")
+num_vars <- dat %>% select(all_of(numeric_cols))
+cor_matrix <- cor(num_vars, use = "complete.obs")
+ggcorrplot(cor_matrix, lab = TRUE, title = "Correlation Plot of Numeric Variables")
+
+# 6. Pair plot for key numerical variables
+ggpairs(dat, columns = which(names(dat) %in% c("death", numeric_cols)))
+
+# 7. Stacked bar plot for symptom variables by death outcome
+symptom_vars <- grep("symptom", names(dat), value = TRUE)
+dat_long <- dat %>% pivot_longer(cols = all_of(symptom_vars), names_to = "Symptom", values_to = "Present")
+
+ggplot(dat_long, aes(x = Symptom, fill = death)) +
+  geom_bar(position = "fill") +
+  labs(title = "Proportion of Symptoms by Death Outcome", y = "Proportion") +
+  coord_flip()
 
 # ------------------------------------
 # Split into training + validation
@@ -146,8 +196,8 @@ params <- list(objective = "binary:logistic", eval_metric = "auc",
                eta = 0.05, # control the learning rate
                gamma = 2, # reduction required before a split is made
                lambda = 1.5,
-               alpha = 0.7) # controls regularisation
-xgcv <- xgb.cv(data = xgdata, nrounds = 300, nfold = 10, verbose = F, params = params,
+               alpha = 0.95) # controls regularisation
+xgcv <- xgb.cv(data = xgdata, nrounds = 300, nfold = 6, verbose = F, params = params,
                early_stopping_rounds = 50,
                maximize = TRUE) # IMPROVE parameters later. Maximise AUC
 
