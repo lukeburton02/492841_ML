@@ -5,6 +5,7 @@ setwd("C:/Users/lukeb/Downloads/LSHTM/TERM 2/Machine Learning/ML assessment/4928
 
 # Import relevant libraries
 install.packages("mboost")
+install.packages("GGally") # remove if unused
 library(tidyverse)
 library(dplyr)
 library(ggplot2)
@@ -14,9 +15,9 @@ library(xgboost)
 library(caret) # used for training, predicting, and pre-processing
 library(pROC)
 library(ggcorrplot)
-install.packages("GGally") # remove if unused
 library(GGally)
 library(gridExtra)
+library(forcats) # for ordering bar plots
 
 # Read in the dataset. Empty rows are ommitted by default
 dat <- read.csv("assignment2025.csv")
@@ -27,7 +28,7 @@ head(dat, 5)
 # Check for missing values
 sum(is.na(dat)) # No missing values
 
-# Create a new dataframe with categorical variables converted
+# Convert categorical variables to factors
 categorical_cols <- names(dat)[sapply(dat, function(x) is.character(x) | is.factor(x))]
 categorical_cols <- setdiff(categorical_cols, 'death')
 dat[categorical_cols] <- lapply(dat[categorical_cols], factor)
@@ -35,21 +36,13 @@ dat[categorical_cols] <- lapply(dat[categorical_cols], factor)
 # Convert the outcome to a factor for proper handling
 dat$death <- factor(dat$death, levels = c(0, 1), labels = c(0, 1))
 
-
 # ------------------------------------
 # Section 1: Exploratory data analysis
 # ------------------------------------
 
 summary(dat)
 
-table(y)
 
-tstats <- apply(data[, -which(names(data) == "death")], 2, function(x) {
-  t.test(x ~ data$death)$statistic
-})
-barplot(tstats, las = 2, main = "T-Statistics for Each Predictor", 
-        col = "black", border = "red", ylim = c(-30, 30))
-abline(h = c(-2, 2), col = "red", lwd = 2)
 
 
 
@@ -58,9 +51,9 @@ abline(h = c(-2, 2), col = "red", lwd = 2)
 # Explore death rate by subtype
 death_rate <- dat %>%
   group_by(subtype) %>%
-  summarise(drate = mean(death) * 100)
+  summarise(drate = mean(as.numeric(death)-1) * 100)
 
-ggplot(death_rate, aes(x = subtype, y = drate)) +
+ggplot(death_rate, aes(x = fct_reorder(subtype, drate), y = drate)) +
   geom_bar(stat = "identity", fill = "steelblue", color = "black") +
   labs(x = "Stroke Subtype", y = "Percentage Who Died (%)", title = "Death Rate by Stroke Subtype") +
   theme_minimal() +
@@ -82,35 +75,58 @@ p2 <- ggplot(dat, aes(x = death, y = age, fill = death)) +
 p3 <- ggplot(dat, aes(x = death, y = sbp, fill = death)) +
   geom_boxplot() + labs(title = "Systolic BP by Death Outcome")
 
-grid.arrange(p1, p2, p3, ncol = 2)
+grid.arrange(p1, p2, p3, ncol = 3)
 
 # 4. Bar plots for categorical variables by death outcome
-categorical_vars <- setdiff(categorical_cols, "death")
+cat_summary <- dat %>%
+  select(all_of(categorical_cols), death) %>%
+  select(-starts_with("symptom")) %>%
+  group_by(death) %>%
+  summarise(across(everything(), ~paste0(sum(. == levels(.)[2]), " (", round(mean(. == levels(.)[2]) * 100, 1), "%)"))) %>%
+  pivot_longer(-death, names_to = "Variable", values_to = "Count (%)")
 
-p_list_cat <- lapply(categorical_vars, function(var) {
-  ggplot(dat, aes(x = .data[[var]], fill = death)) +
-    geom_bar(position = "fill") +
-    labs(title = paste("Proportion of", var, "by Death Outcome"), y = "Proportion")
-})
-do.call(grid.arrange, c(p_list_cat, ncol = 2))
+print(cat_summary)  # Display summary table
 
-# 5. Correlation plot for numeric variables
-numeric_cols <- c("delay", "age", "sbp")
-num_vars <- dat %>% select(all_of(numeric_cols))
-cor_matrix <- cor(num_vars, use = "complete.obs")
-ggcorrplot(cor_matrix, lab = TRUE, title = "Correlation Plot of Numeric Variables")
+cat_summary <- dat %>%
+  select(all_of(categorical_cols), death) %>%
+  select(-starts_with("symptom")) %>%
+  group_by(death) %>%
+  summarise(across(everything(), ~sum(. == levels(.)[2]))) %>%
+  pivot_longer(-death, names_to = "Variable", values_to = "Count") %>%
+  pivot_wider(names_from = death, values_from = Count)
+colnames(cat_summary) <- c("Variable", "Survived", "Died")
+print(cat_summary)
 
-# 6. Pair plot for key numerical variables
-ggpairs(dat, columns = which(names(dat) %in% c("death", numeric_cols)))
+# 5. Correlation analysis (only binary categorical + numeric vars with death)
+binary_cats <- categorical_cols[sapply(dat[categorical_cols], function(x) length(unique(x)) == 2)]
+selected_vars <- c(numeric_cols, binary_cats)
 
-# 7. Stacked bar plot for symptom variables by death outcome
-symptom_vars <- grep("symptom", names(dat), value = TRUE)
-dat_long <- dat %>% pivot_longer(cols = all_of(symptom_vars), names_to = "Symptom", values_to = "Present")
+# Convert binary categorical variables to numeric for correlation
+dat_corr <- dat %>% select(all_of(selected_vars)) %>% mutate(across(all_of(binary_cats), as.numeric))
+dat_corr$death <- as.numeric(dat$death)  # Convert death to numeric
 
-ggplot(dat_long, aes(x = Symptom, fill = death)) +
-  geom_bar(position = "fill") +
-  labs(title = "Proportion of Symptoms by Death Outcome", y = "Proportion") +
-  coord_flip()
+# Compute correlation matrix
+cor_matrix <- cor(dat_corr, use = "complete.obs")
+cor_values <- data.frame(Variable = rownames(cor_matrix)[-ncol(cor_matrix)], 
+                         Correlation = round(cor_matrix[-ncol(cor_matrix), "death"], 3))
+cor_values <- cor_values[order(abs(cor_values$Correlation), decreasing = TRUE), ]  # Sort by absolute correlation
+
+print(cor_values)  # Display correlation table
+
+
+# 6. Stacked bar plot for symptom variables by death outcome
+symptom_vars <- grep("^symptom", names(dat), value = TRUE)
+symptom_death <- dat %>%
+  pivot_longer(cols = all_of(symptom_vars), names_to = "Symptom", values_to = "Present") %>%
+  filter(Present == "Y") %>%
+  group_by(Symptom) %>%
+  summarise(DeathRate = mean(death == "Died") * 100)
+
+ggplot(symptom_death, aes(x = reorder(Symptom, DeathRate), y = DeathRate, fill = DeathRate)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Death Rate by Symptom", y = "Death Rate (%)", x = "Symptom") +
+  scale_fill_gradient(low = "blue", high = "red")
 
 # ------------------------------------
 # Split into training + validation
