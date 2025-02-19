@@ -18,6 +18,8 @@ library(pROC)
 library(ggcorrplot)
 library(GGally)
 library(gridExtra)
+library(randomForest)
+library(ranger) # used for random forests
 library(forcats) # for ordering bar plots
 library(smotefamily) # for balancing training data
 
@@ -208,9 +210,9 @@ plot(enetmod, xTrans = log10)
 #                                          classProbs = TRUE),
 #                 metric = "logLoss")
 
-# After constructing the previous models, we will enhance the elastic net model
+# After constructing the previous models, we will adjust the elastic net model
 # This is done through adjusting the death balance of the dataset
-# We also centre and scale continuous variables to avoid bias based on ranges
+# We also centre and scale continuous variables to avoid bias based on variable ranges
 set.seed(42)
 dattr_balanced <- upSample(x = dattr[, -which(names(dattr) == "death")], y = dattr$death) %>%
   rename(death = Class)
@@ -250,125 +252,94 @@ enetmod_adj <- train(death ~ .,
 # Section 3: Tree-based methods
 # ------------------------------------
 
-# L2 boosting - gradient boosting with logistic loss
-# Convert the outcome to a factor, bearing in mind coefficients are halved under glmboost
-l2boost <- glmboost(death ~ ., data=dat, family = Binomial())
-# Explore coefficient evolution
-boostcoefs <- coef(l2boost, aggregate = "cumsum") |> 
-  do.call(what = rbind) |> t() 
-colnames(boostcoefs) <- names(coef(l2boost, aggregate = "cumsum"))
-# Increase iterations to identify optimal iterations
-l2boost2 <- glmboost(death ~ ., data=dat, control = boost_control(mstop = 1000))
-set.seed(2) # For reproducibility
-folds <- cv(model.weights(l2boost2), type = "kfold") # Define CV folds
-cvres2 <- cvrisk(l2boost2, folds) # Apply CV
-plot(cvres2)
-# Change the learning rate to 0.5
-l2boost3 <- glmboost(death ~ ., data = dat, control = boost_control(mstop = 1000, nu = .5))
-cvres3 <- cvrisk(l2boost3, folds) # Apply CV
-plot(cvres3)
+# Whilst Random Forests are commonly used, XGBoost is generally more powerful
+# This involves better handling of imbalance, alongside boosting for more optimal performance
+# Random Forest works better with downsampling than upsampling to reduce bias
+# In this case, downsampling returns much fewer data points, reducing predictive ability
 
+# XGBoost model
 
+# Load testing and training matrices in a supported format
+Xtr_mat <- model.matrix(death ~ . -1, dattr)
+Xte_mat <- model.matrix(death ~ . -1, datte)
+Ytr_num <- as.numeric(dattr$death) - 1
+Yte_num <- as.numeric(datte$death) - 1
 
+# Convert to DMatrix
+xgtrain <- xgb.DMatrix(data = Xtr_mat, label = Ytr_num)
+xgtest <- xgb.DMatrix(data = Xte_mat, label = Yte_num)
 
+# Create the XGBoost model using cross-validation
+params <- list(objective = "binary:logistic", eval_metric = "auc")
+xgcv <- xgb.cv(data = xgtrain, nrounds = 500, nfold = 10, 
+                      verbose = FALSE, params = params)
 
-# XGBoost
-
-# Try upsampling
-up_data <- upSample(x = dattr %>% select(-death), y = dattr$death) %>%
-  rename(death = Class)
-
-X <- model.matrix(death ~ . - 1, up_data)
-Y <- factor(up_data$death, levels = c("Survived", "Died"), labels = c("Survived", "Died"))
-
-# Convert to DMatrix - UPDATE NAME
-xgdata <- xgb.DMatrix(data = X, label = as.numeric(Y) - 1)
-
-# Tune the number of iterations
-set.seed(55)
-params <- list(objective = "binary:logistic", eval_metric = "auc",
-               scale_pos_weight = 2, # pay more attention to minority class to improve specificity
-               max_depth = 6,
-               min_child_weight = 8,
-               subsample = 0.8,
-               colsample_bytree = 0.8,
-               eta = 0.05, # control the learning rate
-               gamma = 2, # reduction required before a split is made
-               lambda = 1.5,
-               alpha = 0.5) # controls regularisation
-xgcv <- xgb.cv(data = xgdata, nrounds = 100, nfold = 6, verbose = F, params = params,
-               early_stopping_rounds = 50,
-               maximize = TRUE) # IMPROVE parameters later. Maximise AUC
-
+# Determine best AUC and rounds
 (auc_best <- max(xgcv$evaluation_log[,"test_auc_mean"])) # Best AUC
 (nrounds_best <- which.max(unlist(xgcv$evaluation_log[,"test_auc_mean"]))) # Step at which this was achieved
 
+# Plot AUC by iteration
 plot(test_auc_mean ~ iter, data = xgcv$evaluation_log, col = "darkgreen", 
      type = "b", pch = 16, ylab = "Test AUC", xlab = "Iteration") +
   abline(v = nrounds_best, lty = 2)
 
-# Fit final model with best parameters
-xgbmod <- xgb.train(data = xgdata, nrounds = nrounds_best, params = params)
-
-
-# Determine predictive accuracy
-probxgb <- predict(xgbmod, Xte)
-predxgb <- factor(probxgb > 0.5, levels = c("FALSE", "TRUE"), labels = c("Survived", "Died")) # Label must match test labels
-
-# Confusion Matrix
-conf_matrix <- confusionMatrix(predxgb, as.factor(Yte))
-print(conf_matrix)
-
-# Accuracy
-accuracy <- sum(predxgb == Yte) / length(Yte)
-cat("Accuracy: ", accuracy, "\n")
-
-# ROC Curve and AUC Calculation
-roc_curve <- roc(Yte, probxgb)
-plot(roc_curve, col = "blue", main = paste("ROC Curve (AUC =", round(auc(roc_curve), 2), ")"))
-
-
-# Specificity and Sensitivity
-sensitivity <- conf_matrix$byClass["Sensitivity"]
-specificity <- conf_matrix$byClass["Specificity"]
-cat("Sensitivity: ", sensitivity, "\n")
-cat("Specificity: ", specificity, "\n")
+# Fit final basic model with best parameters
+xgbmod <- xgb.train(data = xgtrain, nrounds = nrounds_best, params = params)
 
 
 
+# Create a more advanced model with extra parameters and balanced data
+Xtr_bal_mat <- model.matrix(death ~ . -1, dattr_balanced)
+Ytr_bal_num <- as.numeric(dattr_balanced$death) - 1
+xgtrain_bal <- xgb.DMatrix(data = Xtr_bal_mat, label = Ytr_bal_num)
 
-
-
-
-
-
-
-
-
-# Use a more developed parameter method
-
-# Define XGBoost parameters
-params <- list(
+# Define advanced parameters
+params_adv <- list(
   objective = "binary:logistic",  # Probability estimation for binary classification
-  eval_metric = "logloss",        # Log-loss is best for probability prediction
-  eta = 0.1,                      # Learning rate
-  max_depth = 4,                  # Tree depth
+  eval_metric = "auc",            # AUC as evaluation metric - log-loss may be better for probability estimation
+  eta = 0.05,                     # Learning rate
+  max_depth = 6,                  # Tree depth
+  min_child_weight = 8,           # Minimum leaf weight
   subsample = 0.8,                # Prevent overfitting
-  colsample_bytree = 0.8,          # Feature sampling for diversity
-  scale_pos_weight = sum(trainData$death == 0) / sum(trainData$death == 1) # Weight due to class imbalance
+  colsample_bytree = 0.8,         # Feature sampling for diversity
+  scale_pos_weight = sum(Ytr_bal_num == 0) / sum(Ytr_bal_num == 1),  # Handle imbalance
+  lambda = 1.5,                   # L2 regularization
+  alpha = 0.5,                    # L1 regularization
+  gamma = 2                       # Minimum loss reduction to make a split
 )
 
-# Train XGBoost model with early stopping
-xgb_model <- xgb.train(
-  params = params,
-  data = xgb_train,
-  nrounds = 500,                   # Number of boosting rounds
-  watchlist = list(train = xgb_train, valid = xgb_valid),
-  early_stopping_rounds = 10,       # Stops if no improvement
+# Train XGBoost model using 10-fold cross-validation
+set.seed(123)
+xgcv_adv <- xgb.cv(
+  params = params_adv,
+  data = xgtrain_bal,
+  nrounds = 200,                  # Maximum number of boosting rounds
+  nfold = 10,                     # Number of folds for cross-validation
+  early_stopping_rounds = 20,     # Stop if no improvement
   verbose = 1
 )
 
+# Extract the best AUC from cross-validation and optimal rounds
+(auc_best_adv <- max(xgcv_adv$evaluation_log[,"test_auc_mean"]))  # Best AUC
+(nrounds_best_adv <- which.max(unlist(xgcv_adv$evaluation_log[,"test_auc_mean"])))  # Step at which best AUC was achieved
 
+# Plot AUC by iteration for the advanced model
+plot(test_auc_mean ~ iter, data = xgcv_adv$evaluation_log, col = "darkgreen", 
+     type = "b", pch = 16, ylab = "Test AUC", xlab = "Iteration") +
+  abline(v = nrounds_best_adv, lty = 2)
+
+# Convert the balanced training data to DMatrix format
+Xtrain_adv <- model.matrix(death ~ . - 1, dattr_balanced)
+Ytrain_adv <- factor(dattr_balanced$death, levels = c("Survived", "Died"), labels = c("Survived", "Died"))
+xgb_train_adv <- xgb.DMatrix(data = Xtrain_adv, label = as.numeric(Ytrain_adv) - 1)
+
+# Train the final model using the best nrounds and parameters from xgcv_adv
+final_model_adv <- xgb.train(
+  params = params_adv,
+  data = xgb_train_adv,
+  nrounds = nrounds_best_adv,          # Best number of boosting rounds
+  verbose = 1
+)
 
 
 # ------------------------------------
@@ -381,11 +352,13 @@ ridge_prob <- predict(ridgemod, newx = Xte, type = "response")
 ridge_pred <- factor(ridge_prob > .5, levels = c("FALSE", "TRUE"), 
                     labels = c("Survived", "Died"))
 summary(ridge_pred)
+
 # 2: Lasso predictions
 lasso_prob <- predict(lassomod, newx = Xte, type = "response")
 lasso_pred <- factor(lasso_prob > .5, levels = c("FALSE", "TRUE"), 
                     labels = c("Survived", "Died"))
 summary(lasso_pred)
+
 # 3: Elastic net predictions on best model
 best_lambda <- enetmod$bestTune$lambda
 enet_fin <- enetmod$finalModel
@@ -399,6 +372,7 @@ enet_prob <- predict(enet_fin, newx = Xte_subset, type = "response", s = best_la
 enet_pred <- factor(enet_prob > .5, levels = c("FALSE", "TRUE"), 
                      labels = c("Survived", "Died"))
 summary(enet_pred)
+
 # 4: Elastic net predictions using more balanced and scaled dataset
 best_lambda_adj <- enetmod_adj$bestTune$lambda
 enet_fin_adj <- enetmod_adj$finalModel
@@ -414,7 +388,13 @@ Xte_subset_adj <- Xte_scaled[, selected_features_adj]
 enet_prob_adj <- predict(enet_fin_adj, newx = Xte_subset_adj, type = "response", s = best_lambda_adj)
 enet_pred_adj <- factor(enet_prob_adj > .5, levels = c("FALSE", "TRUE"), labels = c("Survived", "Died"))
 
+# 5: Simple XGBoost predictions
+xgb_prob <- predict(xgbmod, Xte)
+xgb_pred <- factor(probxgb > 0.5, levels = c("FALSE", "TRUE"), labels = c("Survived", "Died")) # Label must match test labels
 
+# 6: Enhanced XGBoost predictions 
+xgb_prob_adv <- predict(final_model_adv, Xte)
+xgb_pred_adv <- factor(xgb_prob_adv > 0.5, levels = c("FALSE", "TRUE"), labels = c("Survived", "Died"))
 
 
 # Evaluate the performance of a model, given predictions and true outcomes
@@ -468,23 +448,25 @@ ridge_eval <- evaluate_model("Ridge", ridge_prob, Yte)
 lasso_eval <- evaluate_model("Lasso", lasso_prob, Yte)
 enet_eval <- evaluate_model("Elastic Net", enet_prob, Yte)
 enet_eval_adj <- evaluate_model("Adjusted Elastic Net", enet_prob_adj, Yte)
+xgb_eval <- evaluate_model("XGBoost", xgb_prob, Yte)
+xgb_eval_adv <- evaluate_model("Advanced XGBoost", xgb_prob_adv, Yte)
 
 # Print table of results
 results_df <- data.frame(
-  Model = c("Ridge", "Lasso", "Elastic Net", "Adjusted Elastic Net"),
-  AUC = round(c(ridge_eval$auc, lasso_eval$auc, enet_eval$auc, enet_eval_adj$auc), 3),
-  Sensitivity = round(c(ridge_eval$sensitivity, lasso_eval$sensitivity, enet_eval$sensitivity, enet_eval_adj$sensitivity), 3),
-  Specificity = round(c(ridge_eval$specificity, lasso_eval$specificity, enet_eval$specificity, enet_eval_adj$specificity), 3),
-  F1 = round(c(ridge_eval$f1_score, lasso_eval$f1_score, enet_eval$f1_score, enet_eval_adj$f1_score), 3),
-  Balanced_Acc = paste0(round(c(ridge_eval$balanced_accuracy, lasso_eval$balanced_accuracy, enet_eval$balanced_accuracy, enet_eval_adj$balanced_accuracy) *100, 2), "%"),
-  Threshold = round(c(ridge_eval$threshold, lasso_eval$threshold, enet_eval$threshold, enet_eval_adj$threshold), 3)
+  Model = c("Ridge", "Lasso", "Elastic Net", "Adjusted Elastic Net", "XGBoost", "Advanced XGBoost"),
+  AUC = round(c(ridge_eval$auc, lasso_eval$auc, enet_eval$auc, enet_eval_adj$auc, xgb_eval$auc, xgb_eval_adv$auc), 3),
+  Sensitivity = round(c(ridge_eval$sensitivity, lasso_eval$sensitivity, enet_eval$sensitivity, enet_eval_adj$sensitivity, xgb_eval$sensitivity, xgb_eval_adv$sensitivity), 3),
+  Specificity = round(c(ridge_eval$specificity, lasso_eval$specificity, enet_eval$specificity, enet_eval_adj$specificity, xgb_eval$specificity, xgb_eval_adv$specificity), 3),
+  F1 = round(c(ridge_eval$f1_score, lasso_eval$f1_score, enet_eval$f1_score, enet_eval_adj$f1_score, xgb_eval$f1_score, xgb_eval_adv$f1_score), 3),
+  Balanced_Acc = paste0(round(c(ridge_eval$balanced_accuracy, lasso_eval$balanced_accuracy, enet_eval$balanced_accuracy, enet_eval_adj$balanced_accuracy, xgb_eval$balanced_accuracy, xgb_eval_adv$balanced_accuracy) *100, 2), "%"),
+  Threshold = round(c(ridge_eval$threshold, lasso_eval$threshold, enet_eval$threshold, enet_eval_adj$threshold, xgb_eval$threshold, xgb_eval_adv$threshold), 3)
 )
 # Rename the balanced accuracy column to look nicer
 colnames(results_df)[colnames(results_df) == "Balanced_Acc"] <- "Balanced Accuracy"
 
+# View the evaluation dataframe for each model
 print(results_df)
-
-
+View(results_df)
 
 # Explore and compare feature importance from each model
 # 1. Ridge
@@ -507,17 +489,27 @@ enet_coef_adj <- as.numeric(enet_coef_adj[-1])
 names(enet_coef_adj) <- rownames(coef(enet_fin_adj, s = best_lambda_adj))[-1] 
 enet_coef_adj <- abs(enet_coef_adj)
 
+# 5. Simple XGBoost - Feature Importance
+xgb_imp <- xgb.importance(model = xgbmod)
+
+# 6. Enhanced XGBoost - Feature Importance
+xgb_adv_imp <- xgb.importance(model = final_model_adv)
+
 # Combine all models feature importances into a data frame
 ridge_top10 <- sort(ridge_imp, decreasing = TRUE)[1:10]
 lasso_top10 <- sort(lasso_imp, decreasing = TRUE)[1:10]
 enet_top10 <- sort(enet_coef, decreasing = TRUE)[1:10]
 enet_adj_top10 <- sort(enet_coef_adj, decreasing = TRUE)[1:10]
+xgb_top10 <- xgb_imp[1:10, ]
+xgb_adv_top10 <- xgb_adv_imp[1:10, ]
 
 # Prepare data for plotting
 ridge_df <- data.frame(Feature = names(ridge_top10), Importance = ridge_top10)
 lasso_df <- data.frame(Feature = names(lasso_top10), Importance = lasso_top10)
 enet_df <- data.frame(Feature = names(enet_top10), Importance = enet_top10)
 enet_adj_df <- data.frame(Feature = names(enet_adj_top10), Importance = enet_adj_top10)
+xgb_df <- data.frame(Feature = xgb_top10$Feature, Importance = xgb_top10$Gain)
+xgb_adv_df <- data.frame(Feature = xgb_adv_top10$Feature, Importance = xgb_adv_top10$Gain)
 
 # Ridge plot
 ggplot(ridge_df, aes(x = reorder(Feature, Importance), y = Importance)) +
@@ -547,10 +539,26 @@ ggplot(enet_adj_df, aes(x = reorder(Feature, Importance), y = Importance)) +
   labs(title = "Top 10 Adjusted Elastic Net Feature Importances", x = "Feature", y = "Importance") +
   theme_minimal()
 
+# Simple XGBoost plot
+ggplot(xgb_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  coord_flip() +
+  labs(title = "Top 10 XGBoost Feature Importances", x = "Feature", y = "Importance") +
+  theme_minimal()
+
+# Advanced XGBoost plot
+ggplot(xgb_adv_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "red") +
+  coord_flip() +
+  labs(title = "Top 10 Advanced XGBoost Feature Importances", x = "Feature", y = "Importance") +
+  theme_minimal()
+
 # Print top 10 features for each model in a table
 list(
   Ridge_Top_10 = ridge_df,
   Lasso_Top_10 = lasso_df,
   Elastic_Net_Top_10 = enet_df,
-  Elastic_Net_Adjusted_Top_10 = enet_adj_df
+  Elastic_Net_Adjusted_Top_10 = enet_adj_df,
+  XGBoost_Top_10 = xgb_df,
+  Advanced_XGBoost_Top_10 = xgb_adv_df
 )
