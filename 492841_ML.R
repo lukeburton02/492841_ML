@@ -47,12 +47,6 @@ dat$death <- factor(dat$death, levels = c(0, 1), labels = c("Survived", "Died"))
 
 summary(dat)
 
-
-
-
-
-
-
 # Explore death rate by subtype
 death_rate <- dat %>%
   group_by(subtype) %>%
@@ -61,7 +55,7 @@ death_rate <- dat %>%
 ggplot(death_rate, aes(x = fct_reorder(subtype, drate), y = drate)) +
   geom_bar(stat = "identity", fill = "steelblue", color = "black") +
   labs(x = "Stroke Subtype", y = "Percentage Who Died (%)", title = "Death Rate by Stroke Subtype") +
-  theme_minimal() +
+  theme_minimal() +s
   theme_bw()
 
 
@@ -562,3 +556,4 @@ list(
   XGBoost_Top_10 = xgb_df,
   Advanced_XGBoost_Top_10 = xgb_adv_df
 )
+s
