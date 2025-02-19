@@ -6,6 +6,7 @@ setwd("C:/Users/lukeb/Downloads/LSHTM/TERM 2/Machine Learning/ML assessment/4928
 # Import relevant libraries
 install.packages("mboost")
 install.packages("GGally") # remove if unused
+install.packages("smotefamily") # used for oversampling
 library(tidyverse)
 library(dplyr)
 library(ggplot2)
@@ -18,6 +19,8 @@ library(ggcorrplot)
 library(GGally)
 library(gridExtra)
 library(forcats) # for ordering bar plots
+library(smotefamily) # for balancing training data
+
 
 # Read in the dataset. Empty rows are ommitted by default
 dat <- read.csv("assignment2025.csv")
@@ -165,7 +168,6 @@ ridgemod <- cv.glmnet(Xtr, Ytr,
 plot(ridgemod, main = "Ridge Model Tuning")
 
 
-
 # Train a lasso model with alpha = 1 (default)
 lassomod <- cv.glmnet(Xtr, Ytr,
                       family = "binomial")
@@ -185,21 +187,64 @@ enetmod <- train(death ~ .,
                                           summaryFunction = twoClassSummary,
                                           classProbs = TRUE),
                  metric = "ROC")
-enetmod$bestTune
+
+# Obtain the best tuning parameters
+print(enetmod$bestTune)
 
 # Plot the ROC for each model
 plot(enetmod, xTrans = log10)
 
 
-# Try minimising log-loss instead of maximising AUC
-enetmod2 <- train(death ~ ., dattr, method = "glmnet", 
-                  family = "binomial",
-                  tuneGrid = expand.grid(alpha = 0:10 / 10, 
-                                         lambda = 10^seq(-5, 2, length.out = 100)),
-                  trControl = trainControl("cv", classProbs = TRUE, summaryFunction = mnLogLoss), 
-                  metric = "logLoss")
-enetmod2$bestTune
-plot(enetmod2, xTrans = log10)
+# We could minimise logLoss instead, although the differences are marginal here
+# enetmod <- train(death ~ .,
+#                 data = dattr,
+#                 method = "glmnet", 
+#                 family = "binomial",
+#                 tuneGrid = expand.grid(alpha = 0:10 / 10, 
+#                                        lambda = 10^seq(-5, 2, length.out = 100)),
+#                 trControl = trainControl("cv",
+#                                          number = 10,
+#                                          summaryFunction = mnLogLoss,
+#                                          classProbs = TRUE),
+#                 metric = "logLoss")
+
+# After constructing the previous models, we will enhance the elastic net model
+# This is done through adjusting the death balance of the dataset
+# We also centre and scale continuous variables to avoid bias based on ranges
+set.seed(42)
+dattr_balanced <- upSample(x = dattr[, -which(names(dattr) == "death")], y = dattr$death) %>%
+  rename(death = Class)
+
+# Explore balance
+summary(dattr_balanced$death)
+
+# Select if downsampling is used instead
+dattr_down <- downSample(x = dattr[, -which(names(dattr) == "death")], y = dattr$death) %>%
+  rename(death = Class)
+
+# Explore balance
+summary(dattr_down$death)
+
+# Scale and center continuous variables
+continuous_vars <- c("age", "delay", "sbp")
+preProc <- preProcess(dattr_balanced[, continuous_vars], method = c("center", "scale"))
+dattr_balanced[, continuous_vars] <- predict(preProc, dattr_balanced[, continuous_vars])
+# Downsampling equivalent
+preProc_down <- preProcess(dattr_down[, continuous_vars], method = c("center", "scale"))
+dattr_down[, continuous_vars] <- predict(preProc, dattr_down[, continuous_vars])
+
+# Train the adjusted elastic net model - use dattr_balanced or dattr_down as appropriate
+enetmod_adj <- train(death ~ .,
+                          data = dattr_balanced,
+                          method = "glmnet",
+                          family = "binomial",
+                          tuneGrid = expand.grid(alpha = 0:10 / 10, 
+                                                 lambda = 10^seq(-5, 2, length.out = 100)),
+                          trControl = trainControl("cv", number = 10, 
+                                                   summaryFunction = twoClassSummary, 
+                                                   classProbs = TRUE),
+                          metric = "ROC")
+
 
 # ------------------------------------
 # Section 3: Tree-based methods
@@ -228,10 +273,6 @@ plot(cvres3)
 
 
 # XGBoost
-
-# Extract data as matrices
-#X <- model.matrix(death ~ . - 1, dattr)
-#Y <- dattr$death
 
 # Try upsampling
 up_data <- upSample(x = dattr %>% select(-death), y = dattr$death) %>%
@@ -271,8 +312,6 @@ xgbmod <- xgb.train(data = xgdata, nrounds = nrounds_best, params = params)
 
 
 # Determine predictive accuracy
-Xte <- model.matrix(death ~ . - 1, datte)
-Yte <- datte$death
 probxgb <- predict(xgbmod, Xte)
 predxgb <- factor(probxgb > 0.5, levels = c("FALSE", "TRUE"), labels = c("Survived", "Died")) # Label must match test labels
 
@@ -337,7 +376,6 @@ xgb_model <- xgb.train(
 # ------------------------------------
 
 # We get test predictions from each model to compare
-# Delete if unusued
 # 1: Ridge predictions
 ridge_prob <- predict(ridgemod, newx = Xte, type = "response")
 ridge_pred <- factor(ridge_prob > .5, levels = c("FALSE", "TRUE"), 
@@ -348,17 +386,33 @@ lasso_prob <- predict(lassomod, newx = Xte, type = "response")
 lasso_pred <- factor(lasso_prob > .5, levels = c("FALSE", "TRUE"), 
                     labels = c("Survived", "Died"))
 summary(lasso_pred)
-# 3: Elastic net predictions - retrieve just probability of 'Died'
+# 3: Elastic net predictions on best model
 best_lambda <- enetmod$bestTune$lambda
 enet_fin <- enetmod$finalModel
+
 enet_coef <- coef(enet_fin, s = best_lambda)
 enet_coef <- as.matrix(enet_coef)
-selected_features <- rownames(enet_coef)[-1]
+
+selected_features <- rownames(enet_coef)[-1] # Use only applicable features for prediction
 Xte_subset <- Xte[, selected_features]
 enet_prob <- predict(enet_fin, newx = Xte_subset, type = "response", s = best_lambda)
 enet_pred <- factor(enet_prob > .5, levels = c("FALSE", "TRUE"), 
                      labels = c("Survived", "Died"))
 summary(enet_pred)
+# 4: Elastic net predictions using more balanced and scaled dataset
+best_lambda_adj <- enetmod_adj$bestTune$lambda
+enet_fin_adj <- enetmod_adj$finalModel
+
+enet_coef_adj <- coef(enet_fin_adj, s = best_lambda_adj)
+selected_features_adj <- rownames(enet_coef_adj)[-1]  # Apply only selected features
+
+# Ensure predictions are made on scaled data for compatibility
+Xtr_scaled <- scale(Xtr)
+Xte_scaled <- scale(Xte, center = attr(Xtr_scaled, "scaled:center"), 
+                    scale = attr(Xtr_scaled, "scaled:scale"))
+Xte_subset_adj <- Xte_scaled[, selected_features_adj]
+enet_prob_adj <- predict(enet_fin_adj, newx = Xte_subset_adj, type = "response", s = best_lambda_adj)
+enet_pred_adj <- factor(enet_prob_adj > .5, levels = c("FALSE", "TRUE"), labels = c("Survived", "Died"))
 
 
 
@@ -387,13 +441,22 @@ evaluate_model <- function(mod_name, probs, true_vals) {
   # Compute confusion matrix
   cm <- confusionMatrix(pred_labels, true_vals)
   
+  # Calculate precision and recall, for F1 score
+  precision <- cm$byClass["Precision"]
+  recall <- cm$byClass["Sensitivity"]
+  f1_score <- 2 * (precision * recall) / (precision + recall)
+  
+  # Calculate Balanced Accuracy
+  balanced_accuracy <- (cm$byClass["Sensitivity"] + cm$byClass["Specificity"]) / 2
+  
   # Extract relevant metrics
   results <- list(
     model = mod_name,
     auc = auc_score,
     sensitivity = cm$byClass["Sensitivity"],  # Recall for "Died"
     specificity = cm$byClass["Specificity"],  # True negative rate for "Survived"
-    accuracy = cm$overall["Accuracy"]
+    f1_score = f1_score,
+    balanced_accuracy = balanced_accuracy # Used over accuracy due to imbalance
   )
   
   return(results)
@@ -403,15 +466,19 @@ evaluate_model <- function(mod_name, probs, true_vals) {
 ridge_eval <- evaluate_model("Ridge", ridge_prob, Yte)
 lasso_eval <- evaluate_model("Lasso", lasso_prob, Yte)
 enet_eval <- evaluate_model("Elastic Net", enet_prob, Yte)
+enet_eval_adj <- evaluate_model("Adjusted Elastic Net", enet_prob_adj, Yte)
 
 # Print table of results
 results_df <- data.frame(
-  Model = c("Ridge", "Lasso", "Elastic Net"),
-  AUC = round(c(ridge_eval$auc, lasso_eval$auc, enet_eval$auc), 3),
-  Sensitivity = round(c(ridge_eval$sensitivity, lasso_eval$sensitivity, enet_eval$sensitivity), 3),
-  Specificity = round(c(ridge_eval$specificity, lasso_eval$specificity, enet_eval$specificity), 3),
-  Accuracy = paste0(round(c(ridge_eval$accuracy, lasso_eval$accuracy, enet_eval$accuracy) * 100, 2), "%")
+  Model = c("Ridge", "Lasso", "Elastic Net", "Adjusted Elastic Net"),
+  AUC = round(c(ridge_eval$auc, lasso_eval$auc, enet_eval$auc, enet_eval_adj$auc), 3),
+  Sensitivity = round(c(ridge_eval$sensitivity, lasso_eval$sensitivity, enet_eval$sensitivity, enet_eval_adj$sensitivity), 3),
+  Specificity = round(c(ridge_eval$specificity, lasso_eval$specificity, enet_eval$specificity, enet_eval_adj$specificity), 3),
+  F1 = round(c(ridge_eval$f1_score, lasso_eval$f1_score, enet_eval$f1_score, enet_eval_adj$f1_score), 3),
+  Balanced_Acc = paste0(round(c(ridge_eval$balanced_accuracy, lasso_eval$balanced_accuracy, enet_eval$balanced_accuracy, enet_eval_adj$balanced_accuracy) *100, 2), "%")
 )
+# Rename the balanced accuracy column to look nicer
+colnames(results_df)[colnames(results_df) == "Balanced_Acc"] <- "Balanced Accuracy"
 
 print(results_df)
 
@@ -432,15 +499,23 @@ enet_coef <- as.numeric(enet_coef[-1])
 names(enet_coef) <- rownames(coef(enet_fin, s = best_lambda))[-1] 
 enet_coef <- abs(enet_coef)
 
+# 4. Adjusted Elastic Net
+enet_coef_adj <- coef(enet_fin_adj, s = best_lambda_adj)  # Extracting coefficients at the best lambda value
+enet_coef_adj <- as.numeric(enet_coef_adj[-1])
+names(enet_coef_adj) <- rownames(coef(enet_fin_adj, s = best_lambda_adj))[-1] 
+enet_coef_adj <- abs(enet_coef_adj)
+
 # Combine all models feature importances into a data frame
 ridge_top10 <- sort(ridge_imp, decreasing = TRUE)[1:10]
 lasso_top10 <- sort(lasso_imp, decreasing = TRUE)[1:10]
 enet_top10 <- sort(enet_coef, decreasing = TRUE)[1:10]
+enet_adj_top10 <- sort(enet_coef_adj, decreasing = TRUE)[1:10]
 
 # Prepare data for plotting
 ridge_df <- data.frame(Feature = names(ridge_top10), Importance = ridge_top10)
 lasso_df <- data.frame(Feature = names(lasso_top10), Importance = lasso_top10)
 enet_df <- data.frame(Feature = names(enet_top10), Importance = enet_top10)
+enet_adj_df <- data.frame(Feature = names(enet_adj_top10), Importance = enet_adj_top10)
 
 # Ridge plot
 ggplot(ridge_df, aes(x = reorder(Feature, Importance), y = Importance)) +
@@ -463,9 +538,17 @@ ggplot(enet_df, aes(x = reorder(Feature, Importance), y = Importance)) +
   labs(title = "Top 10 Elastic Net Feature Importances", x = "Feature", y = "Importance") +
   theme_minimal()
 
+# Adjusted Elastic Net plot
+ggplot(enet_adj_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "orange") +
+  coord_flip() +
+  labs(title = "Top 10 Adjusted Elastic Net Feature Importances", x = "Feature", y = "Importance") +
+  theme_minimal()
+
 # Print top 10 features for each model in a table
 list(
   Ridge_Top_10 = ridge_df,
   Lasso_Top_10 = lasso_df,
-  Elastic_Net_Top_10 = enet_df
+  Elastic_Net_Top_10 = enet_df,
+  Elastic_Net_Adjusted_Top_10 = enet_adj_df
 )
