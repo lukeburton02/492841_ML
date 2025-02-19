@@ -6,7 +6,6 @@ setwd("C:/Users/lukeb/Downloads/LSHTM/TERM 2/Machine Learning/ML assessment/4928
 # Import relevant libraries
 install.packages("mboost")
 install.packages("GGally") # remove if unused
-install.packages("smotefamily") # used for oversampling
 library(tidyverse)
 library(dplyr)
 library(ggplot2)
@@ -18,10 +17,7 @@ library(pROC)
 library(ggcorrplot)
 library(GGally)
 library(gridExtra)
-library(randomForest)
-library(ranger) # used for random forests
 library(forcats) # for ordering bar plots
-library(smotefamily) # for balancing training data
 
 
 # Read in the dataset. Empty rows are ommitted by default
@@ -55,7 +51,7 @@ death_rate <- dat %>%
 ggplot(death_rate, aes(x = fct_reorder(subtype, drate), y = drate)) +
   geom_bar(stat = "identity", fill = "steelblue", color = "black") +
   labs(x = "Stroke Subtype", y = "Percentage Who Died (%)", title = "Death Rate by Stroke Subtype") +
-  theme_minimal() +s
+  theme_minimal() +
   theme_bw()
 
 
@@ -97,6 +93,7 @@ colnames(cat_summary) <- c("Variable", "Survived", "Died")
 print(cat_summary)
 
 # 5. Correlation analysis (only binary categorical + numeric vars with death)
+numeric_cols <- c("age", "sbp", "delay")
 binary_cats <- categorical_cols[sapply(dat[categorical_cols], function(x) length(unique(x)) == 2)]
 selected_vars <- c(numeric_cols, binary_cats)
 
@@ -384,7 +381,7 @@ enet_pred_adj <- factor(enet_prob_adj > .5, levels = c("FALSE", "TRUE"), labels 
 
 # 5: Simple XGBoost predictions
 xgb_prob <- predict(xgbmod, Xte)
-xgb_pred <- factor(probxgb > 0.5, levels = c("FALSE", "TRUE"), labels = c("Survived", "Died")) # Label must match test labels
+xgb_pred <- factor(xgb_prob > 0.5, levels = c("FALSE", "TRUE"), labels = c("Survived", "Died")) # Label must match test labels
 
 # 6: Enhanced XGBoost predictions 
 xgb_prob_adv <- predict(final_model_adv, Xte)
@@ -556,4 +553,3 @@ list(
   XGBoost_Top_10 = xgb_df,
   Advanced_XGBoost_Top_10 = xgb_adv_df
 )
-s
