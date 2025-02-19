@@ -456,7 +456,8 @@ evaluate_model <- function(mod_name, probs, true_vals) {
     sensitivity = cm$byClass["Sensitivity"],  # Recall for "Died"
     specificity = cm$byClass["Specificity"],  # True negative rate for "Survived"
     f1_score = f1_score,
-    balanced_accuracy = balanced_accuracy # Used over accuracy due to imbalance
+    balanced_accuracy = balanced_accuracy, # Used over accuracy due to imbalance
+    threshold = best_threshold # Include threshold used
   )
   
   return(results)
@@ -475,7 +476,8 @@ results_df <- data.frame(
   Sensitivity = round(c(ridge_eval$sensitivity, lasso_eval$sensitivity, enet_eval$sensitivity, enet_eval_adj$sensitivity), 3),
   Specificity = round(c(ridge_eval$specificity, lasso_eval$specificity, enet_eval$specificity, enet_eval_adj$specificity), 3),
   F1 = round(c(ridge_eval$f1_score, lasso_eval$f1_score, enet_eval$f1_score, enet_eval_adj$f1_score), 3),
-  Balanced_Acc = paste0(round(c(ridge_eval$balanced_accuracy, lasso_eval$balanced_accuracy, enet_eval$balanced_accuracy, enet_eval_adj$balanced_accuracy) *100, 2), "%")
+  Balanced_Acc = paste0(round(c(ridge_eval$balanced_accuracy, lasso_eval$balanced_accuracy, enet_eval$balanced_accuracy, enet_eval_adj$balanced_accuracy) *100, 2), "%"),
+  Threshold = round(c(ridge_eval$threshold, lasso_eval$threshold, enet_eval$threshold, enet_eval_adj$threshold), 3)
 )
 # Rename the balanced accuracy column to look nicer
 colnames(results_df)[colnames(results_df) == "Balanced_Acc"] <- "Balanced Accuracy"
