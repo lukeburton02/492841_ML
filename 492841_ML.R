@@ -129,7 +129,6 @@ ggplot(symptom_death, aes(x = reorder(Symptom, DeathRate), y = DeathRate, fill =
 # ------------------------------------
 
 # We use createDataPartition to preserve the death distribution, reducing bias
-
 psamp <- .2 # Use an 80-20 train-test split
 set.seed(22) # For reproducibility
 testind <- createDataPartition(y = dat$death, p = psamp)[[1]]
@@ -140,7 +139,7 @@ datte <- dat[testind,]
 
 
 # Note that we will not oversample on the validation dataset
-# This is to preserve the underlying low death rate of ~5%
+# This is to preserve the underlying low death rate of ~5%, asserting generalisability
 
 # Convert to model matrix form to use in models
 Xtr <- model.matrix(death ~ . - 1, dattr)
@@ -209,14 +208,14 @@ dattr_balanced <- upSample(x = dattr[, -which(names(dattr) == "death")], y = dat
   rename(death = Class)
 
 # Explore balance
-summary(dattr_balanced$death)
+summary(dattr_balanced$death) # Same number in each group
 
 # Select if downsampling is used instead
 dattr_down <- downSample(x = dattr[, -which(names(dattr) == "death")], y = dattr$death) %>%
   rename(death = Class)
 
 # Explore balance
-summary(dattr_down$death)
+summary(dattr_down$death) # Same number in each group
 
 # Scale and center continuous variables
 continuous_vars <- c("age", "delay", "sbp")
@@ -256,11 +255,11 @@ Xte_mat <- model.matrix(death ~ . -1, datte)
 Ytr_num <- as.numeric(dattr$death) - 1
 Yte_num <- as.numeric(datte$death) - 1
 
-# Convert to DMatrix
+# Convert to DMatrix for XGBoost compatibility
 xgtrain <- xgb.DMatrix(data = Xtr_mat, label = Ytr_num)
 xgtest <- xgb.DMatrix(data = Xte_mat, label = Yte_num)
 
-# Create the XGBoost model using cross-validation
+# Create the basic XGBoost model using cross-validation
 params <- list(objective = "binary:logistic", eval_metric = "auc")
 xgcv <- xgb.cv(data = xgtrain, nrounds = 500, nfold = 10, 
                       verbose = FALSE, params = params)
@@ -279,7 +278,7 @@ xgbmod <- xgb.train(data = xgtrain, nrounds = nrounds_best, params = params)
 
 
 
-# Create a more advanced model with extra parameters and balanced data
+# Create a more advanced XGBoost model with extra parameters and balanced data
 Xtr_bal_mat <- model.matrix(death ~ . -1, dattr_balanced)
 Ytr_bal_num <- as.numeric(dattr_balanced$death) - 1
 xgtrain_bal <- xgb.DMatrix(data = Xtr_bal_mat, label = Ytr_bal_num)
@@ -499,7 +498,7 @@ ridge_df <- data.frame(Feature = names(ridge_top10), Importance = ridge_top10)
 lasso_df <- data.frame(Feature = names(lasso_top10), Importance = lasso_top10)
 enet_df <- data.frame(Feature = names(enet_top10), Importance = enet_top10)
 enet_adj_df <- data.frame(Feature = names(enet_adj_top10), Importance = enet_adj_top10)
-xgb_df <- data.frame(Feature = xgb_top10$Feature, Importance = xgb_top10$Gain)
+xgb_df <- data.frame(Feature = xgb_top10$Feature, Importance = xgb_top10$Gain) # Use Gain for feature importance
 xgb_adv_df <- data.frame(Feature = xgb_adv_top10$Feature, Importance = xgb_adv_top10$Gain)
 
 # Ridge plot
