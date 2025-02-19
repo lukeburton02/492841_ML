@@ -34,7 +34,7 @@ categorical_cols <- setdiff(categorical_cols, 'death')
 dat[categorical_cols] <- lapply(dat[categorical_cols], factor)
 
 # Convert the outcome to a factor for proper handling
-dat$death <- factor(dat$death, levels = c(0, 1), labels = c(0, 1))
+dat$death <- factor(dat$death, levels = c(0, 1), labels = c("Survived", "Died"))
 
 # ------------------------------------
 # Section 1: Exploratory data analysis
@@ -132,31 +132,75 @@ ggplot(symptom_death, aes(x = reorder(Symptom, DeathRate), y = DeathRate, fill =
 # Split into training + validation
 # ------------------------------------
 
-# we use createDataPartition to preserve the death distribution, reducing bias
+# We use createDataPartition to preserve the death distribution, reducing bias
 
-psamp <- .2 # use an 80-20 train-test split
-set.seed(22) # for reproducibility
+psamp <- .2 # Use an 80-20 train-test split
+set.seed(22) # For reproducibility
 testind <- createDataPartition(y = dat$death, p = psamp)[[1]]
 
-# split data
+# Split data
 dattr <- dat[-testind,]
 datte <- dat[testind,]
 
 
-# note that we will not oversample on the validation dataset
-# this is to preserve the underlying low death rate of ~5%
+# Note that we will not oversample on the validation dataset
+# This is to preserve the underlying low death rate of ~5%
 
+# Convert to model matrix form to use in models
+Xtr <- model.matrix(death ~ . - 1, dattr)
+Ytr <- dattr$death
+Xte <- model.matrix(death ~ . - 1, datte)
+Yte <- datte$death
 
 # ------------------------------------
 # Section 2: Regularised regression
 # ------------------------------------
 
+# Use glmnet to create a ridge regression model
+ridgemod <- cv.glmnet(Xtr, Ytr,
+                      family = "binomial",
+                      alpha = 0) # Ridge regression
+
+# Plot the binomial deviance for different values of lambda
+plot(ridgemod, main = "Ridge Model Tuning")
 
 
 
+# Train a lasso model with alpha = 1 (default)
+lassomod <- cv.glmnet(Xtr, Ytr,
+                      family = "binomial")
+plot(lassomod, main = "Lasso tuning")
 
 
 
+# Train an elastic net model with 0 < alpha < 1
+enetmod <- train(death ~ .,
+                 data = dattr,
+                 method = "glmnet", 
+                 family = "binomial",
+                 tuneGrid = expand.grid(alpha = 0:10 / 10, 
+                                        lambda = 10^seq(-5, 2, length.out = 100)),
+                 trControl = trainControl("cv",
+                                          number = 10,
+                                          summaryFunction = twoClassSummary,
+                                          classProbs = TRUE),
+                 metric = "ROC")
+enetmod$bestTune
+
+# Plot the ROC for each model
+# We see that alpha = 0, corresponding to ridge, performs best
+plot(enetmod, xTrans = log10)
+
+
+# Try minimising log-loss instead of maximising AUC
+enetmod2 <- train(death ~ ., dattr, method = "glmnet", 
+                  family = "binomial",
+                  tuneGrid = expand.grid(alpha = 0:10 / 10, 
+                                         lambda = 10^seq(-5, 2, length.out = 100)),
+                  trControl = trainControl("cv", classProbs = TRUE, summaryFunction = mnLogLoss), 
+                  metric = "logLoss")
+enetmod2$bestTune
+plot(enetmod2, xTrans = log10)
 
 # ------------------------------------
 # Section 3: Tree-based methods
@@ -164,7 +208,6 @@ datte <- dat[testind,]
 
 # L2 boosting - gradient boosting with logistic loss
 # Convert the outcome to a factor, bearing in mind coefficients are halved under glmboost
-dat$death <- as.factor(dat$death) 
 l2boost <- glmboost(death ~ ., data=dat, family = Binomial())
 # Explore coefficient evolution
 boostcoefs <- coef(l2boost, aggregate = "cumsum") |> 
@@ -196,7 +239,7 @@ up_data <- upSample(x = dattr %>% select(-death), y = dattr$death) %>%
   rename(death = Class)
 
 X <- model.matrix(death ~ . - 1, up_data)
-Y <- factor(up_data$death, levels = c(0, 1), labels = c(0, 1))
+Y <- factor(up_data$death, levels = c("Survived", "Died"), labels = c("Survived", "Died"))
 
 # Convert to DMatrix - UPDATE NAME
 xgdata <- xgb.DMatrix(data = X, label = as.numeric(Y) - 1)
@@ -204,7 +247,7 @@ xgdata <- xgb.DMatrix(data = X, label = as.numeric(Y) - 1)
 # Tune the number of iterations
 set.seed(55)
 params <- list(objective = "binary:logistic", eval_metric = "auc",
-               scale_pos_weight = 10, # pay more attention to minority class to improve specificity
+               scale_pos_weight = 2, # pay more attention to minority class to improve specificity
                max_depth = 6,
                min_child_weight = 8,
                subsample = 0.8,
@@ -212,8 +255,8 @@ params <- list(objective = "binary:logistic", eval_metric = "auc",
                eta = 0.05, # control the learning rate
                gamma = 2, # reduction required before a split is made
                lambda = 1.5,
-               alpha = 0.95) # controls regularisation
-xgcv <- xgb.cv(data = xgdata, nrounds = 300, nfold = 6, verbose = F, params = params,
+               alpha = 0.5) # controls regularisation
+xgcv <- xgb.cv(data = xgdata, nrounds = 100, nfold = 6, verbose = F, params = params,
                early_stopping_rounds = 50,
                maximize = TRUE) # IMPROVE parameters later. Maximise AUC
 
@@ -232,7 +275,7 @@ xgbmod <- xgb.train(data = xgdata, nrounds = nrounds_best, params = params)
 Xte <- model.matrix(death ~ . - 1, datte)
 Yte <- datte$death
 probxgb <- predict(xgbmod, Xte)
-predxgb <- factor(probxgb > 0.5, levels = c("FALSE", "TRUE"), labels = c(0, 1))
+predxgb <- factor(probxgb > 0.5, levels = c("FALSE", "TRUE"), labels = c("Survived", "Died")) # Label must match test labels
 
 # Confusion Matrix
 conf_matrix <- confusionMatrix(predxgb, as.factor(Yte))
@@ -293,3 +336,26 @@ xgb_model <- xgb.train(
 # ------------------------------------
 # Section 4: Comparison of models
 # ------------------------------------
+
+# We get test predictions from each model to compare
+# Delete if unusued
+# 1: Ridge predictions
+ridge_prob <- predict(ridgemod, newx = Xte, type = "response")
+ridge_pred <- factor(ridge_prob > .5, levels = c("FALSE", "TRUE"), 
+                    labels = c("Survived", "Died"))
+summary(ridge_pred)
+# 2: Lasso predictions
+lasso_prob <- predict(lassomod, newx = Xte, type = "response")
+lasso_pred <- factor(lasso_prob > .5, levels = c("FALSE", "TRUE"), 
+                    labels = c("Survived", "Died"))
+summary(lasso_pred)
+# 3: Elastic net predictions
+enet_prob <- predict(enetmod, newx = Xte, type = "prob")
+enet_pred <- factor(lasso_prob > .5, levels = c("FALSE", "TRUE"), 
+                     labels = c("Survived", "Died"))
+summary(enet_pred)
+
+
+
+
+# Explore and compare feature importance from each model
