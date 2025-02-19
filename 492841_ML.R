@@ -173,7 +173,7 @@ plot(lassomod, main = "Lasso tuning")
 
 
 
-# Train an elastic net model with 0 < alpha < 1
+# Train an elastic net model with alpha in [0,1]
 enetmod <- train(death ~ .,
                  data = dattr,
                  method = "glmnet", 
@@ -188,7 +188,6 @@ enetmod <- train(death ~ .,
 enetmod$bestTune
 
 # Plot the ROC for each model
-# We see that alpha = 0, corresponding to ridge, performs best
 plot(enetmod, xTrans = log10)
 
 
@@ -349,13 +348,124 @@ lasso_prob <- predict(lassomod, newx = Xte, type = "response")
 lasso_pred <- factor(lasso_prob > .5, levels = c("FALSE", "TRUE"), 
                     labels = c("Survived", "Died"))
 summary(lasso_pred)
-# 3: Elastic net predictions
-enet_prob <- predict(enetmod, newx = Xte, type = "prob")
-enet_pred <- factor(lasso_prob > .5, levels = c("FALSE", "TRUE"), 
+# 3: Elastic net predictions - retrieve just probability of 'Died'
+best_lambda <- enetmod$bestTune$lambda
+enet_fin <- enetmod$finalModel
+enet_coef <- coef(enet_fin, s = best_lambda)
+enet_coef <- as.matrix(enet_coef)
+selected_features <- rownames(enet_coef)[-1]
+Xte_subset <- Xte[, selected_features]
+enet_prob <- predict(enet_fin, newx = Xte_subset, type = "response", s = best_lambda)
+enet_pred <- factor(enet_prob > .5, levels = c("FALSE", "TRUE"), 
                      labels = c("Survived", "Died"))
 summary(enet_pred)
 
 
 
 
+# Evaluate the performance of a model, given predictions and true outcomes
+evaluate_model <- function(mod_name, probs, true_vals) {
+  
+  # Convert true values to numeric (Died = 1, Survived = 0)
+  true_numeric <- as.numeric(true_vals == "Died")
+  
+  # Convert probs to numeric vector for ROC compatibility
+  probs <- as.vector(probs)
+  
+  # Compute ROC and AUC
+  roc_curve <- roc(true_numeric, probs)
+  auc_score <- auc(roc_curve)
+  
+  # Use Youden's J index to determine optimal threshold
+  best_index <- which.max(roc_curve$sensitivities + roc_curve$specificities - 1)
+  best_threshold <- roc_curve$thresholds[best_index]
+  
+  # Generate predictions using the above threshold
+  pred_labels <- factor(ifelse(probs > best_threshold, "Died", "Survived"), 
+                        levels = c("Survived", "Died"))
+  
+  # Compute confusion matrix
+  cm <- confusionMatrix(pred_labels, true_vals)
+  
+  # Extract relevant metrics
+  results <- list(
+    model = mod_name,
+    auc = auc_score,
+    sensitivity = cm$byClass["Sensitivity"],  # Recall for "Died"
+    specificity = cm$byClass["Specificity"],  # True negative rate for "Survived"
+    accuracy = cm$overall["Accuracy"]
+  )
+  
+  return(results)
+}
+
+# Evaluate selected models
+ridge_eval <- evaluate_model("Ridge", ridge_prob, Yte)
+lasso_eval <- evaluate_model("Lasso", lasso_prob, Yte)
+enet_eval <- evaluate_model("Elastic Net", enet_prob, Yte)
+
+# Print table of results
+results_df <- data.frame(
+  Model = c("Ridge", "Lasso", "Elastic Net"),
+  AUC = round(c(ridge_eval$auc, lasso_eval$auc, enet_eval$auc), 3),
+  Sensitivity = round(c(ridge_eval$sensitivity, lasso_eval$sensitivity, enet_eval$sensitivity), 3),
+  Specificity = round(c(ridge_eval$specificity, lasso_eval$specificity, enet_eval$specificity), 3),
+  Accuracy = paste0(round(c(ridge_eval$accuracy, lasso_eval$accuracy, enet_eval$accuracy) * 100, 2), "%")
+)
+
+print(results_df)
+
+
+
 # Explore and compare feature importance from each model
+# 1. Ridge
+ridge_imp <- coef(ridgemod)[-1,]  # Removing the intercept
+ridge_imp <- abs(ridge_imp)  # Taking absolute value to measure importance
+
+# 2. Lasso
+lasso_imp <- coef(lassomod)[-1,]
+lasso_imp <- abs(lasso_imp)
+
+# 3. Elastic Net
+enet_coef <- coef(enet_fin, s = best_lambda)  # Extracting coefficients at the best lambda value
+enet_coef <- as.numeric(enet_coef[-1])
+names(enet_coef) <- rownames(coef(enet_fin, s = best_lambda))[-1] 
+enet_coef <- abs(enet_coef)
+
+# Combine all models feature importances into a data frame
+ridge_top10 <- sort(ridge_imp, decreasing = TRUE)[1:10]
+lasso_top10 <- sort(lasso_imp, decreasing = TRUE)[1:10]
+enet_top10 <- sort(enet_coef, decreasing = TRUE)[1:10]
+
+# Prepare data for plotting
+ridge_df <- data.frame(Feature = names(ridge_top10), Importance = ridge_top10)
+lasso_df <- data.frame(Feature = names(lasso_top10), Importance = lasso_top10)
+enet_df <- data.frame(Feature = names(enet_top10), Importance = enet_top10)
+
+# Ridge plot
+ggplot(ridge_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "green") +
+  coord_flip() +
+  labs(title = "Top 10 Ridge Feature Importances", x = "Feature", y = "Importance") +
+  theme_minimal()
+
+# Lasso plot
+ggplot(lasso_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top 10 Lasso Feature Importances", x = "Feature", y = "Importance") +
+  theme_minimal()
+
+# Elastic Net plot
+ggplot(enet_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "orange") +
+  coord_flip() +
+  labs(title = "Top 10 Elastic Net Feature Importances", x = "Feature", y = "Importance") +
+  theme_minimal()
+
+# Print top 10 features for each model in a table
+list(
+  Ridge_Top_10 = ridge_df,
+  Lasso_Top_10 = lasso_df,
+  Elastic_Net_Top_10 = enet_df
+)
