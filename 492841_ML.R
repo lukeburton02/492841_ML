@@ -25,11 +25,11 @@ library(glmnet)
 library(mboost)
 library(xgboost)
 library(caret) # used for training, predicting, and pre-processing
-library(pROC)
+library(pROC) # Required for the ROC curve
 library(ggcorrplot)
 library(GGally)
 library(gridExtra)
-library(forcats) # for ordering bar plots
+library(forcats) # For ordering bar plots
 
 
 # Read in the dataset. Empty rows are ommitted by default
@@ -468,6 +468,30 @@ colnames(results_df)[colnames(results_df) == "Balanced_Acc"] <- "Balanced Accura
 # View the evaluation dataframe for each model
 print(results_df)
 View(results_df)
+
+
+# Produce the ROC curve for each model
+plot_roc_curve <- function(model_name, probs, true_vals) {
+  true_numeric <- as.numeric(true_vals == "Died")
+  roc_curve <- roc(true_numeric, probs)
+  auc_score <- auc(roc_curve)
+  
+  plot(roc_curve, main = paste("ROC Curve -", model_name), col = "blue", lwd = 2)
+  
+  text(x = 0.95, y = 0.95, labels = paste("AUC =", round(auc_score, 3)), adj = 0, cex = 1.2, font = 2)
+}
+
+# Plot ROC curves for each model
+plot_roc_curve("Ridge", ridge_prob, Yte)
+plot_roc_curve("Lasso", lasso_prob, Yte)
+plot_roc_curve("Elastic Net", enet_prob, Yte)
+plot_roc_curve("Adjusted Elastic Net", enet_prob_adj, Yte)
+plot_roc_curve("XGBoost", xgb_prob, Yte)
+plot_roc_curve("Advanced XGBoost", xgb_prob_adv, Yte)
+
+# ------------------------------------
+# Comparing feature importances
+# ------------------------------------
 
 # Explore and compare feature importance from each model
 # 1. Ridge
