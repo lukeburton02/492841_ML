@@ -67,22 +67,67 @@ ggplot(death_rate, aes(x = fct_reorder(subtype, drate), y = drate)) +
   theme_bw()
 
 
-# Outcome variable distribution (Bar plot)
-ggplot(dat, aes(x = death)) +
-  geom_bar(fill = "blue") +
-  labs(title = "Death Outcome Distribution", x = "Death (0 = Survived, 1 = Died)", y = "Count")
+# Calculate death percentages
+death_summary <- dat %>%
+  count(death) %>%
+  mutate(percent = 100 * n / sum(n))  # Convert count to percentage
+
+# Outcome plot with percentages
+ggplot(death_summary, aes(x = death, y = n, fill = death)) +
+  geom_bar(stat = "identity", color = "black", linewidth = 0.3) +  # Light black outline
+  geom_text(aes(label = paste0(round(percent, 1), "%")), 
+            vjust = -0.3, size = 5, color = "black") +  # Position text closer
+  scale_fill_manual(values = c("Died" = "salmon", "Survived" = "lightblue")) +  # Light red & light blue
+  labs(title = "Death Outcome Distribution", y = "Count", x = NULL) +  # Remove x-axis label
+  theme_bw() +
+  theme(plot.margin = margin(10, 10, 20, 10), legend.position = "none") +  # Adjust margin & remove legend
+  coord_cartesian(ylim = c(0, max(death_summary$n) * 1.03))
 
 # Boxplots for numeric variables by death outcome
+fill_colors <- c("Died" = "salmon", "Survived" = "lightblue")
+
+# Function to create boxplots with shared theme
+boxplot_theme <- theme_bw() +
+  theme(
+    legend.position = "none",
+    plot.margin = margin(3, 3, 3, 3),  # Reduce extra space
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank()
+  )
+
 p1 <- ggplot(dat, aes(x = death, y = delay, fill = death)) +
-  geom_boxplot() + labs(title = "Delay Time by Death Outcome")
+  geom_boxplot(outlier.shape = NA, color = "black") +
+  scale_fill_manual(values = fill_colors) +
+  labs(title = "Delay (hours)", y = "Delay Time") +
+  boxplot_theme
 
 p2 <- ggplot(dat, aes(x = death, y = age, fill = death)) +
-  geom_boxplot() + labs(title = "Age by Death Outcome")
+  geom_boxplot(outlier.shape = NA, color = "black") +
+  scale_fill_manual(values = fill_colors) +
+  labs(title = "Age (years)", y = "Age") +
+  boxplot_theme
 
 p3 <- ggplot(dat, aes(x = death, y = sbp, fill = death)) +
-  geom_boxplot() + labs(title = "Systolic BP by Death Outcome")
+  geom_boxplot(outlier.shape = NA, color = "black") +
+  scale_fill_manual(values = fill_colors) +
+  labs(title = "Systolic BP", y = "Systolic BP") +
+  boxplot_theme
 
-grid.arrange(p1, p2, p3, ncol = 3)
+# Extract the legend once
+legend <- cowplot::get_legend(
+  p1 + theme(legend.position = "right", legend.title = element_blank())
+)
+
+# Arrange plots with reduced spacing
+grid.arrange(
+  arrangeGrob(p1, p2, p3, ncol = 3),
+  legend,
+  ncol = 2,
+  widths = c(4, 0.8)  # Reduce width ratio to tighten space
+)
+
+
+
 
 # Bar plots for categorical variables by death outcome
 cat_summary <- dat %>%
@@ -134,7 +179,7 @@ ggplot(symptom_death, aes(x = reorder(Symptom, DeathRate), y = DeathRate, fill =
   geom_col() +
   coord_flip() +
   labs(title = "Death Rate by Symptom", y = "Death Rate (%)", x = "Symptom") +
-  scale_fill_gradient(low = "blue", high = "red")
+  scale_fill_gradient(name = "Rate (%)", low = "blue", high = "red")
 
 # ------------------------------------
 # Split into training + validation
@@ -170,14 +215,14 @@ ridgemod <- cv.glmnet(Xtr, Ytr,
 
 # Plot the binomial deviance for different values of lambda
 plot(ridgemod, main = "Ridge Model Tuning")
-
+ridgemod$lambda.min
 
 # Train a lasso model with alpha = 1 (default)
 lassomod <- cv.glmnet(Xtr, Ytr,
                       family = "binomial")
 plot(lassomod, main = "Lasso tuning")
 
-
+lassomod$lambda.min
 
 # Train an elastic net model with alpha in [0,1]
 enetmod <- train(death ~ .,
@@ -478,7 +523,7 @@ plot_roc_curve <- function(model_name, probs, true_vals) {
   
   plot(roc_curve, main = paste("ROC Curve -", model_name), col = "blue", lwd = 2)
   
-  text(x = 0.95, y = 0.95, labels = paste("AUC =", round(auc_score, 3)), adj = 0, cex = 1.2, font = 2)
+  text(x = 1, y = 0.95, labels = paste("AUC =", round(auc_score, 3)), adj = 0, cex = 1.2, font = 2)
 }
 
 # Plot ROC curves for each model
@@ -587,3 +632,4 @@ list(
   XGBoost_Top_10 = xgb_df,
   Advanced_XGBoost_Top_10 = xgb_adv_df
 )
+
