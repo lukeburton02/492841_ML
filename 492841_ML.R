@@ -3,9 +3,21 @@
 # Set your working directory
 setwd("C:/Users/lukeb/Downloads/LSHTM/TERM 2/Machine Learning/ML assessment/492841_ML")
 
+
+# ------------------------------------
+# Structure of this script:
+# - Import relevant libraries and dataset
+# - Carry out exploratory data analysis
+# - Create a test/train split on the data
+# - Train each regularised regression model
+# - Train each tree-based model
+# - Evaluate and compare each model
+# ------------------------------------
+
+
 # Import relevant libraries
 install.packages("mboost")
-install.packages("GGally") # remove if unused
+install.packages("GGally")
 library(tidyverse)
 library(dplyr)
 library(ggplot2)
@@ -55,12 +67,12 @@ ggplot(death_rate, aes(x = fct_reorder(subtype, drate), y = drate)) +
   theme_bw()
 
 
-# 2. Outcome variable distribution (Bar plot)
+# Outcome variable distribution (Bar plot)
 ggplot(dat, aes(x = death)) +
   geom_bar(fill = "blue") +
   labs(title = "Death Outcome Distribution", x = "Death (0 = Survived, 1 = Died)", y = "Count")
 
-# 3. Boxplots for numeric variables by death outcome
+# Boxplots for numeric variables by death outcome
 p1 <- ggplot(dat, aes(x = death, y = delay, fill = death)) +
   geom_boxplot() + labs(title = "Delay Time by Death Outcome")
 
@@ -72,7 +84,7 @@ p3 <- ggplot(dat, aes(x = death, y = sbp, fill = death)) +
 
 grid.arrange(p1, p2, p3, ncol = 3)
 
-# 4. Bar plots for categorical variables by death outcome
+# Bar plots for categorical variables by death outcome
 cat_summary <- dat %>%
   select(all_of(categorical_cols), death) %>%
   select(-starts_with("symptom")) %>%
@@ -92,7 +104,7 @@ cat_summary <- dat %>%
 colnames(cat_summary) <- c("Variable", "Survived", "Died")
 print(cat_summary)
 
-# 5. Correlation analysis (only binary categorical + numeric vars with death)
+# Correlation analysis on binary and numerical columns
 numeric_cols <- c("age", "sbp", "delay")
 binary_cats <- categorical_cols[sapply(dat[categorical_cols], function(x) length(unique(x)) == 2)]
 selected_vars <- c(numeric_cols, binary_cats)
@@ -110,7 +122,7 @@ cor_values <- cor_values[order(abs(cor_values$Correlation), decreasing = TRUE), 
 print(cor_values)  # Display correlation table
 
 
-# 6. Stacked bar plot for symptom variables by death outcome
+# Use as stacked bar plot to compare death rate by symptom
 symptom_vars <- grep("^symptom", names(dat), value = TRUE)
 symptom_death <- dat %>%
   pivot_longer(cols = all_of(symptom_vars), names_to = "Symptom", values_to = "Present") %>%
@@ -257,7 +269,6 @@ Yte_num <- as.numeric(datte$death) - 1
 
 # Convert to DMatrix for XGBoost compatibility
 xgtrain <- xgb.DMatrix(data = Xtr_mat, label = Ytr_num)
-xgtest <- xgb.DMatrix(data = Xte_mat, label = Yte_num)
 
 # Create the basic XGBoost model using cross-validation
 params <- list(objective = "binary:logistic", eval_metric = "auc")
