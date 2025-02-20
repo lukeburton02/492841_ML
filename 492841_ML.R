@@ -6,7 +6,7 @@ setwd("C:/Users/lukeb/Downloads/LSHTM/TERM 2/Machine Learning/ML assessment/4928
 
 # ------------------------------------
 # Structure of this script:
-# - Import relevant libraries and dataset
+# - Import relevant libraries and datasets
 # - Carry out exploratory data analysis
 # - Create a test/train split on the data
 # - Train each regularised regression model
@@ -317,7 +317,7 @@ xgcv_adv <- xgb.cv(
   nrounds = 200,                  # Maximum number of boosting rounds
   nfold = 10,                     # Number of folds for cross-validation
   early_stopping_rounds = 20,     # Stop if no improvement
-  verbose = 1
+  verbose = FALSE                 # Set to TRUE to see result of each iteration
 )
 
 # Extract the best AUC from cross-validation and optimal rounds
