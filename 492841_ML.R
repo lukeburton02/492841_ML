@@ -113,20 +113,12 @@ p3 <- ggplot(dat, aes(x = death, y = sbp, fill = death)) +
   labs(title = "Systolic BP", y = "Systolic BP") +
   boxplot_theme
 
-# Extract the legend once
-legend <- cowplot::get_legend(
-  p1 + theme(legend.position = "right", legend.title = element_blank())
-)
-
 # Arrange plots with reduced spacing
 grid.arrange(
   arrangeGrob(p1, p2, p3, ncol = 3),
-  legend,
   ncol = 2,
   widths = c(4, 0.8)  # Reduce width ratio to tighten space
 )
-
-
 
 
 # Bar plots for categorical variables by death outcome
@@ -179,7 +171,8 @@ ggplot(symptom_death, aes(x = reorder(Symptom, DeathRate), y = DeathRate, fill =
   geom_col() +
   coord_flip() +
   labs(title = "Death Rate by Symptom", y = "Death Rate (%)", x = "Symptom") +
-  scale_fill_gradient(name = "Rate (%)", low = "blue", high = "red")
+  scale_fill_gradient(name = "Rate (%)", low = "blue", high = "red") +
+  theme_bw()
 
 # ------------------------------------
 # Split into training + validation
