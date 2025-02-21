@@ -48,6 +48,8 @@ head(dat, 5)
 sum(is.na(dat)) # No missing values
 
 # Convert categorical variables to factors
+# This is required for proper handling in machine learning models
+# This includes when converting to model matrix and determining outcome classes
 categorical_cols <- names(dat)[sapply(dat, function(x) is.character(x) | is.factor(x))]
 categorical_cols <- setdiff(categorical_cols, 'death')
 dat[categorical_cols] <- lapply(dat[categorical_cols], factor)
@@ -62,11 +64,13 @@ dat$death <- factor(dat$death, levels = c(0, 1), labels = c("Survived", "Died"))
 # Summarise each variable
 summary(dat)
 
-# Explore death rate by subtype
+# Explore death rate by stroke subtype
 death_rate <- dat %>%
   group_by(subtype) %>%
   summarise(drate = mean(as.numeric(death)-1) * 100)
 
+# We see significant variation in death rate by subtype
+# This suggests type, especially presence of TACS, could help predict death
 ggplot(death_rate, aes(x = fct_reorder(subtype, drate), y = drate)) +
   geom_bar(stat = "identity", fill = "steelblue", color = "black") +
   geom_hline(yintercept = 4.7, linetype = "dashed", color = "black", size = 1) +
@@ -75,46 +79,50 @@ ggplot(death_rate, aes(x = fct_reorder(subtype, drate), y = drate)) +
   theme_bw()
 
 
-# Calculate death percentages
+# Calculate percentage of cases who fall under each outcome (died or survived)
 death_summary <- dat %>%
   count(death) %>%
   mutate(percent = 100 * n / sum(n))  # Convert count to percentage
 
-# Outcome plot with percentages
-ggplot(death_summary, aes(x = death, y = n, fill = death)) +
-  geom_bar(stat = "identity", color = "black", linewidth = 0.3) +  # Light black outline
-  geom_text(aes(label = paste0(round(percent, 1), "%")), 
-            vjust = -0.3, size = 5, color = "black") +  # Position text closer
-  scale_fill_manual(values = c("Died" = "salmon", "Survived" = "lightblue")) +  # Light red & light blue
-  labs(title = "Death Outcome Distribution", y = "Count", x = NULL) +  # Remove x-axis label
-  theme_bw() +
-  theme(plot.margin = margin(10, 10, 20, 10), legend.position = "none") +  # Adjust margin & remove legend
-  coord_cartesian(ylim = c(0, max(death_summary$n) * 1.03))
-
-# Boxplots for numeric variables by death outcome
+# Outcome plot with percentages - clearly the majority (95.3%) survived
+# This also shows a clear imbalance in the dataset, which will be addressed later
+# We adjust these plots for suitable spacing, removing labels where appropriate and using a consistent colour pallette
+# Colours for numerical boxplots
 fill_colors <- c("Died" = "salmon", "Survived" = "lightblue")
+ggplot(death_summary, aes(x = death, y = n, fill = death)) +
+  geom_bar(stat = "identity", color = "black", linewidth = 0.3) +  
+  geom_text(aes(label = paste0(round(percent, 1), "%")), 
+            vjust = -0.3, size = 5, color = "black") +  
+  scale_fill_manual(values = fill_colors) +  
+  labs(title = "Death Outcome Distribution", y = "Count", x = NULL) +  
+  theme_bw() +
+  theme(plot.margin = margin(10, 10, 20, 10), legend.position = "none") +  
+  coord_cartesian(ylim = c(0, max(death_summary$n) * 1.03))
 
 # Function to create boxplots with shared theme
 boxplot_theme <- theme_bw() +
   theme(
     legend.position = "none",
-    plot.margin = margin(3, 3, 3, 3),  # Reduce extra space
+    plot.margin = margin(3, 3, 3, 3),  
     axis.title.x = element_blank(),
     axis.title.y = element_blank()
   )
 
+# Delay distribution by outcome
 p1 <- ggplot(dat, aes(x = death, y = delay, fill = death)) +
   geom_boxplot(outlier.shape = 16, outlier.size = 1, color = "black") +
   scale_fill_manual(values = fill_colors) +
   labs(title = "Delay (hours)", y = "Delay Time") +
   boxplot_theme
 
+# Age distribution by outcome
 p2 <- ggplot(dat, aes(x = death, y = age, fill = death)) +
   geom_boxplot(outlier.shape = 16, outlier.size = 1, color = "black") +
   scale_fill_manual(values = fill_colors) +
   labs(title = "Age (years)", y = "Age") +
   boxplot_theme
 
+# SBP distribution by outcome
 p3 <- ggplot(dat, aes(x = death, y = sbp, fill = death)) +
   geom_boxplot(outlier.shape = 16, outlier.size = 1, color = "black") +
   scale_fill_manual(values = fill_colors) +
@@ -130,20 +138,21 @@ grid.arrange(
 
 
 # Use as stacked bar plot to compare death rate by symptom
+# Retrieve symptom variables in a concise manner
 symptom_vars <- grep("^symptom", names(dat), value = TRUE)
 symptom_death <- dat %>%
   pivot_longer(cols = all_of(symptom_vars), names_to = "Symptom", values_to = "Present") %>%
   filter(Present == "Y") %>%
-  mutate(Symptom = gsub("^symptom", "", Symptom)) %>%
+  mutate(Symptom = gsub("^symptom", "", Symptom)) %>% # Remove symptom from the variable name
   group_by(Symptom) %>%
-  summarise(DeathRate = mean(death == "Died") * 100)
+  summarise(DeathRate = mean(death == "Died") * 100) # Calculate the death rate per symptom
 
 ggplot(symptom_death, aes(x = reorder(Symptom, DeathRate), y = DeathRate, fill = DeathRate)) +
   geom_col() +
   coord_flip() +
   labs(title = "Death Rate by Symptom", y = "Death Rate (%)", x = "Symptom") +
-    scale_fill_gradient(guide = "none", low = "#6495ED", high = "#D22B2B") +  # Soft pastel blue to red
-  geom_hline(yintercept = 4.7, linetype = "dashed", color = "black", size = 1) +  # Dashed vertical line at 4.7%
+    scale_fill_gradient(guide = "none", low = "#6495ED", high = "#D22B2B") +  
+  geom_hline(yintercept = 4.7, linetype = "dashed", color = "black", size = 1) +  # Dashed vertical line at 4.7% (baseline death rate)
   theme_bw() +
   theme(plot.margin = margin(10, 10, 20, 10))
 
@@ -156,13 +165,13 @@ cramers_v <- function(x, y) {
   return(stat$cramer)
 }
 
-# Retrieve all categorical columns, including death
+# Retrieve all categorical columns, including death this time
 categorical_cols <- names(dat)[sapply(dat, function(x) is.character(x) | is.factor(x))]
 # Create an empty correlation matrix
 n <- length(categorical_cols)
 cat_corr_matrix <- matrix(NA, nrow = n, ncol = n, dimnames = list(categorical_cols, categorical_cols))
 
-# Compute pairwise Cramér's V
+# Compute pairwise Cramér's V - this handles categorical variables, even if the number of levels differs
 for (i in seq_along(categorical_cols)) {
   for (j in seq_along(categorical_cols)) {
     if (i == j) {
@@ -181,22 +190,22 @@ ggplot(corr_melted, aes(x = Var1, y = Var2, fill = value)) +
   geom_tile(color = "white") +  
   scale_fill_gradient2(low = "#6495ED", mid = "white", high = "#D22B2B", midpoint = 0.5, name = "Cramér's V") +
   labs(title = "Categorical Variable Correlation Heatmap", x = "", y = "") +
-  theme_bw() +  # Consistent with theme_bw()
+  theme_bw() +  
   theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
-    plot.margin = margin(10, 10, 20, 10),  # Consistent margin
-    panel.grid = element_blank()  # No gridlines for a cleaner look
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for readibility
+    plot.margin = margin(10, 10, 20, 10),  
+    panel.grid = element_blank()  
   ) +
   coord_fixed()  # Ensures a perfect square layout
 
 
 
-# Compute death rate for treat1
+# Compute death rate for treatment 1 types
 death_treat1 <- dat %>%
   group_by(treat1) %>%
   summarise(drate = mean(death == "Died") * 100)
 
-# Compute death rate for treat2
+# Compute death rate for treatment 2 types
 death_treat2 <- dat %>%
   group_by(treat2) %>%
   summarise(drate = mean(death == "Died") * 100)
@@ -206,7 +215,7 @@ plot1 <- ggplot(death_treat1, aes(x = treat1, y = drate, fill = treat1)) +
   geom_bar(stat = "identity", color = "black") +
   geom_hline(yintercept = 4.7, linetype = "dashed", color = "black", size = 1) +
   labs(title = "Death Rate by Treatment 1", x = "Treatment 1", y = "Death Rate (%)") +
-  scale_fill_manual(values = c("L" = "#6495ED", "M" = "#FFA07A", "N" = "#D22B2B")) +  # Blue, Salmon, Red
+  scale_fill_manual(values = c("L" = "#6495ED", "M" = "#FFA07A", "N" = "#D22B2B")) +  
   theme_bw() +
   theme(legend.position = "none")
 
@@ -215,17 +224,17 @@ plot2 <- ggplot(death_treat2, aes(x = treat2, y = drate, fill = treat2)) +
   geom_bar(stat = "identity", color = "black") +
   geom_hline(yintercept = 4.7, linetype = "dashed", color = "black", size = 1) +
   labs(title = "Death Rate by Treatment 2", x = "Treatment 2", y = "Death Rate (%)") +
-  scale_fill_manual(values = c("Y" = "#6495ED", "N" = "#D22B2B")) +  # Blue, Red
+  scale_fill_manual(values = c("Y" = "#6495ED", "N" = "#D22B2B")) +  
   theme_bw() +
   theme(legend.position = "none")
 
-# Combine the two plots side by side
+# Place the two plots side-by-side
 plot1 + plot2
 
 
 
 # ------------------------------------
-# Split into training + validation
+# Split into training + validation sets
 # ------------------------------------
 
 # We use createDataPartition to preserve the death distribution, reducing bias
@@ -233,7 +242,8 @@ psamp <- .2 # Use an 80-20 train-test split
 set.seed(22) # For reproducibility
 testind <- createDataPartition(y = dat$death, p = psamp)[[1]]
 
-# Split data
+# Split data into testing and training
+# We will use dattr to train each model below
 dattr <- dat[-testind,]
 datte <- dat[testind,]
 
@@ -259,7 +269,7 @@ ridgemod <- cv.glmnet(Xtr, Ytr,
 # Plot the binomial deviance for different values of lambda
 plot(ridgemod, main = "Ridge Model Tuning")
 
-# Obtain the best lambda
+# Obtain the best lambda, which minimises log-loss
 ridgemod$lambda.min
 
 # Train a lasso model with alpha = 1 (default)
@@ -268,7 +278,7 @@ lassomod <- cv.glmnet(Xtr, Ytr,
 plot(lassomod, main = "Lasso tuning")  
 abline(v = log(lassomod$lambda.min), col = "blue", lty = 2)  
 abline(v = log(lassomod$lambda.1se), col = "red", lty = 2)  
-text(log(lassomod$lambda.min), max(lassomod$cvm), "Min log-loss", pos = 4, col = "blue")  
+text(log(lassomod$lambda.min), max(lassomod$cvm), "Min log-loss", pos = 4, col = "blue") # Caption each highlighted value
 text(log(lassomod$lambda.1se), max(lassomod$cvm), "1se", pos = 4, col = "red")  
 
 
@@ -361,11 +371,13 @@ p2 <- ggplot(death_summary_bal, aes(x = death, y = n, fill = death)) +
   coord_cartesian(ylim = c(0, max(death_summary_bal$n) * 1.03))
 
 # Compare both plots now
-grid.arrange(p1, p2, ncol = 2)
+grid.arrange(p1, p2, ncol = 2) # Clearly there is more balance with the upsampled data
 
 ###
 
 # Scale and center continuous variables
+# This ensures variables with greater range don't disproportionately shrink coefficients
+# Centering prevents bias towards certain variables due to their scale
 continuous_vars <- c("age", "delay", "sbp")
 preProc <- preProcess(dattr_balanced[, continuous_vars], method = c("center", "scale"))
 dattr_balanced[, continuous_vars] <- predict(preProc, dattr_balanced[, continuous_vars])
@@ -374,6 +386,8 @@ preProc_down <- preProcess(dattr_down[, continuous_vars], method = c("center", "
 dattr_down[, continuous_vars] <- predict(preProc, dattr_down[, continuous_vars])
 
 # Train the adjusted elastic net model - use dattr_balanced or dattr_down as appropriate
+# We find better results with upsampled data due to more data to train the model on
+# However, the duplicates can also lead to bias and less variance in the training data
 enetmod_adj <- train(death ~ .,
                           data = dattr_balanced,
                           method = "glmnet",
@@ -385,6 +399,9 @@ enetmod_adj <- train(death ~ .,
                                                    classProbs = TRUE),
                           metric = "ROC")
 
+# NOTE: we used upSample here, leading to large counts of duplicated data
+# Alternatively, we could use SMOTE to create synthetic data reflecting the minority class
+# This maintains variance in the dataset, however is more computationally expensive
 
 # ------------------------------------
 # Section 3: Tree-based methods
@@ -407,11 +424,13 @@ Yte_num <- as.numeric(datte$death) - 1
 xgtrain <- xgb.DMatrix(data = Xtr_mat, label = Ytr_num)
 
 # Create the basic XGBoost model using cross-validation
+# In this context, "test" does not mean our datte dataset from before
+# Rather, it means the average results on the validation set within each fold
 params <- list(objective = "binary:logistic", eval_metric = "auc")
 xgcv <- xgb.cv(data = xgtrain, nrounds = 500, nfold = 10, 
                       verbose = FALSE, params = params)
 
-# Determine best AUC and rounds
+# Determine best AUC and the number of rounds at which this was achieved
 (auc_best <- max(xgcv$evaluation_log[,"test_auc_mean"])) # Best AUC
 (nrounds_best <- which.max(unlist(xgcv$evaluation_log[,"test_auc_mean"]))) # Step at which this was achieved
 
@@ -427,10 +446,10 @@ ggplot(xgcv$evaluation_log, aes(x = iter)) +
 ggplot(xgcv$evaluation_log, aes(x = iter, y = test_auc_mean)) +
   geom_line(color = "darkgreen", size = 1) +  # Line plot for AUC
   geom_point(color = "darkgreen", size = 1) +  # Points on the line
-  geom_vline(xintercept = nrounds_best, linetype = "dashed", color = "red") +  # Vertical line at best iteration
-  labs(title = "AUC by Iteration", x = "Iteration", y = "Validation AUC") +  # Labels
+  geom_vline(xintercept = nrounds_best, linetype = "dashed", color = "red") +  
+  labs(title = "AUC by Iteration", x = "Iteration", y = "Validation AUC") +  
   theme_bw() +  # Consistent theme
-  theme(plot.margin = margin(10, 10, 20, 10))  # Adjust margin for better spacing
+  theme(plot.margin = margin(10, 10, 20, 10))  
 
 # Fit final basic model with best parameters
 xgbmod <- xgb.train(data = xgtrain, nrounds = nrounds_best, params = params)
@@ -439,6 +458,7 @@ xgbmod <- xgb.train(data = xgtrain, nrounds = nrounds_best, params = params)
 # IMPORTANT: this code takes the first factor, Survived, as the positive class
 # Therefore the sensitivity and specificity returned here should be reversed
 # In the table further below, I simply relabel these columns to account for this
+# The alternative option is to refactor our known labels in Ytr and Yte
 probs <- predict(xgbmod, Xte)
 roc_curve <- roc(Yte, probs)
 best_index <- which.max(roc_curve$sensitivities + roc_curve$specificities - 1)
@@ -480,7 +500,7 @@ params_adv <- list(
   min_child_weight = 8,           # Minimum leaf weight
   subsample = 0.8,                # Prevent overfitting
   colsample_bytree = 0.8,         # Feature sampling for diversity
-  scale_pos_weight = sum(Ytr_bal_num == 0) / sum(Ytr_bal_num == 1),  # Handle imbalance
+  scale_pos_weight = sum(Ytr_bal_num == 0) / sum(Ytr_bal_num == 1),  # Handle class imbalance
   lambda = 1.5,                   # L2 regularization
   alpha = 0.5,                    # L1 regularization
   gamma = 2                       # Minimum loss reduction to make a split
@@ -505,8 +525,8 @@ xgcv_adv <- xgb.cv(
 ggplot(xgcv_adv$evaluation_log, aes(x = iter, y = test_auc_mean)) +
   geom_line(color = "darkgreen", size = 1) +  # Line plot for AUC
   geom_point(color = "darkgreen", size = 2) +  # Points on the line
-  geom_vline(xintercept = nrounds_best_adv, linetype = "dashed", color = "red") +  # Vertical line at best iteration
-  labs(title = "AUC by Iteration", x = "Iteration", y = "Validation AUC") +  # Labels
+  geom_vline(xintercept = nrounds_best_adv, linetype = "dashed", color = "red") +  
+  labs(title = "AUC by Iteration", x = "Iteration", y = "Validation AUC") +  
   theme_bw() +  # Consistent theme
   theme(plot.margin = margin(10, 10, 20, 10))  # Adjust margin for better spacing
 
@@ -514,9 +534,9 @@ ggplot(xgcv_adv$evaluation_log, aes(x = iter, y = test_auc_mean)) +
 ggplot(xgcv_adv$evaluation_log, aes(x = iter)) +
   geom_line(aes(y = train_auc_mean), color = "blue", size = 1) +  # Training AUC
   geom_line(aes(y = test_auc_mean), color = "darkgreen", size = 1) +  # Validation AUC
-  labs(title = "Training vs Validation AUC", x = "Iteration", y = "AUC") +  # Labels
+  labs(title = "Training vs Validation AUC", x = "Iteration", y = "AUC") +  
   theme_bw() +  # Consistent theme
-  theme(plot.margin = margin(10, 10, 20, 10))  # Adjust margin for better spacing
+  theme(plot.margin = margin(10, 10, 20, 10))  
 
 
 # Convert the balanced training data to DMatrix format
@@ -528,7 +548,7 @@ xgb_train_adv <- xgb.DMatrix(data = Xtrain_adv, label = as.numeric(Ytrain_adv) -
 final_model_adv <- xgb.train(
   params = params_adv,
   data = xgb_train_adv,
-  nrounds = nrounds_best_adv,          # Best number of boosting rounds
+  nrounds = nrounds_best_adv,         
   verbose = 1
 )
 
@@ -569,7 +589,7 @@ best_lambda_adj <- enetmod_adj$bestTune$lambda
 enet_fin_adj <- enetmod_adj$finalModel
 
 enet_coef_adj <- coef(enet_fin_adj, s = best_lambda_adj)
-selected_features_adj <- rownames(enet_coef_adj)[-1]  # Apply only selected features
+selected_features_adj <- rownames(enet_coef_adj)[-1]  # Make predictions using only retained features
 
 # Ensure predictions are made on scaled data for compatibility
 Xtr_scaled <- scale(Xtr)
@@ -627,7 +647,7 @@ evaluate_model <- function(mod_name, probs, true_vals) {
     sensitivity = cm$byClass["Sensitivity"],  # Recall for "Died"
     specificity = cm$byClass["Specificity"],  # True negative rate for "Survived"
     f1_score = f1_score,
-    balanced_accuracy = balanced_accuracy, # Used over accuracy due to imbalance
+    bal_acc = balanced_accuracy, # Used over accuracy due to imbalance
     threshold = best_threshold # Include threshold used
   )
   
@@ -651,7 +671,7 @@ results_df <- data.frame(
   Specificity = round(c(ridge_eval$sensitivity, lasso_eval$sensitivity, enet_eval$sensitivity, enet_eval_adj$sensitivity, xgb_eval$sensitivity, xgb_eval_adv$sensitivity), 3),
   Sensitivity = round(c(ridge_eval$specificity, lasso_eval$specificity, enet_eval$specificity, enet_eval_adj$specificity, xgb_eval$specificity, xgb_eval_adv$specificity), 3),
   F1 = round(c(ridge_eval$f1_score, lasso_eval$f1_score, enet_eval$f1_score, enet_eval_adj$f1_score, xgb_eval$f1_score, xgb_eval_adv$f1_score), 3),
-  Balanced_Acc = paste0(round(c(ridge_eval$balanced_accuracy, lasso_eval$balanced_accuracy, enet_eval$balanced_accuracy, enet_eval_adj$balanced_accuracy, xgb_eval$balanced_accuracy, xgb_eval_adv$balanced_accuracy) *100, 2), "%"),
+  Balanced_Acc = paste0(round(c(ridge_eval$bal_acc, lasso_eval$bal_acc, enet_eval$bal_acc, enet_eval_adj$bal_acc, xgb_eval$bal_acc, xgb_eval_adv$bal_acc) *100, 2), "%"),
   Threshold = round(c(ridge_eval$threshold, lasso_eval$threshold, enet_eval$threshold, enet_eval_adj$threshold, xgb_eval$threshold, xgb_eval_adv$threshold), 3)
 )
 # Rename the balanced accuracy column to look nicer
@@ -659,7 +679,7 @@ colnames(results_df)[colnames(results_df) == "Balanced_Acc"] <- "Balanced Accura
 
 # View the evaluation dataframe for each model
 print(results_df)
-View(results_df[c(5,6),])
+View(results_df)
 
 
 # Produce the ROC curve for each model
@@ -736,7 +756,7 @@ xgb_adv_df_freq <- data.frame(Feature = xgb_adv_top10$Feature, Importance = xgb_
 ggplot(ridge_df, aes(x = reorder(Feature, Importance), y = Importance)) +
   geom_bar(stat = "identity", fill = "#A3D9A5", color = "black", linewidth = 0.3) +  # Pastel green with black outline
   coord_flip() +
-  labs(title = "Top 10 Ridge Feature Importances", x = "Feature", y = "Importance") +
+  labs(title = "Top 10 Ridge Feature Importances", x = "Feature", y = "Importance (abs)") +
   theme_bw() + 
   theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
@@ -744,7 +764,7 @@ ggplot(ridge_df, aes(x = reorder(Feature, Importance), y = Importance)) +
 ggplot(lasso_df, aes(x = reorder(Feature, Importance), y = Importance)) +
   geom_bar(stat = "identity", fill = "#A3B9D7", color = "black", linewidth = 0.3) +  # Pastel blue with black outline
   coord_flip() +
-  labs(title = "Top 10 Lasso Feature Importances", x = "Feature", y = "Importance") +
+  labs(title = "Top 10 Lasso Feature Importances", x = "Feature", y = "Importance (abs)") +
   theme_bw() + 
   theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
@@ -752,7 +772,7 @@ ggplot(lasso_df, aes(x = reorder(Feature, Importance), y = Importance)) +
 ggplot(enet_df, aes(x = reorder(Feature, Importance), y = Importance)) +
   geom_bar(stat = "identity", fill = "#F7C57F", color = "black", linewidth = 0.3) +  # Pastel orange with black outline
   coord_flip() +
-  labs(title = "Top 10 Elastic Net Feature Importances", x = "Feature", y = "Importance") +
+  labs(title = "Top 10 Elastic Net Feature Importances", x = "Feature", y = "Importance (abs)") +
   theme_bw() + 
   theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
@@ -760,15 +780,15 @@ ggplot(enet_df, aes(x = reorder(Feature, Importance), y = Importance)) +
 ggplot(enet_adj_df, aes(x = reorder(Feature, Importance), y = Importance)) +
   geom_bar(stat = "identity", fill = "#F7C57F", color = "black", linewidth = 0.3) +  # Pastel orange with black outline
   coord_flip() +
-  labs(title = "Top 10 Adjusted Elastic Net Feature Importances", x = "Feature", y = "Importance") +
+  labs(title = "Top 10 Adjusted Elastic Net Feature Importances", x = "Feature", y = "Importance (abs)") +
   theme_bw() + 
   theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
 # Simple XGBoost Gain plot
 ggplot(xgb_df_gain, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "#D8A1D6", color = "black", linewidth = 0.3) +  # Pastel purple with black outline
+  geom_bar(stat = "identity", fill = "#D97D7D", color = "black", linewidth = 0.3) +  # Pastel purple with black outline
   coord_flip() +
-  labs(title = "Top 10 XGBoost Feature Importances (Gain)", x = "Feature", y = "Importance (Gain)") +
+  labs(title = "Top 10 XGBoost Feature Importances", x = "Feature", y = "Importance (Gain)") +
   theme_bw() + 
   theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
@@ -776,7 +796,7 @@ ggplot(xgb_df_gain, aes(x = reorder(Feature, Importance), y = Importance)) +
 ggplot(xgb_df_freq, aes(x = reorder(Feature, Importance), y = Importance)) +
   geom_bar(stat = "identity", fill = "#D8A1D6", color = "black", linewidth = 0.3) +  # Pastel purple with black outline
   coord_flip() +
-  labs(title = "Top 10 XGBoost Feature Importances (Frequency)", x = "Feature", y = "Importance (Frequency)") +
+  labs(title = "Top 10 XGBoost Feature Importances", x = "Feature", y = "Importance (Frequency)") +
   theme_bw() + 
   theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
