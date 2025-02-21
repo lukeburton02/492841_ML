@@ -725,8 +725,12 @@ ridge_df <- data.frame(Feature = names(ridge_top10), Importance = ridge_top10)
 lasso_df <- data.frame(Feature = names(lasso_top10), Importance = lasso_top10)
 enet_df <- data.frame(Feature = names(enet_top10), Importance = enet_top10)
 enet_adj_df <- data.frame(Feature = names(enet_adj_top10), Importance = enet_adj_top10)
-xgb_df <- data.frame(Feature = xgb_top10$Feature, Importance = xgb_top10$Gain) # Use Gain for feature importance
-xgb_adv_df <- data.frame(Feature = xgb_adv_top10$Feature, Importance = xgb_adv_top10$Gain)
+
+xgb_df_gain <- data.frame(Feature = xgb_top10$Feature, Importance = xgb_top10$Gain)
+xgb_df_freq <- data.frame(Feature = xgb_top10$Feature, Importance = xgb_top10$Frequency)
+
+xgb_adv_df_gain <- data.frame(Feature = xgb_adv_top10$Feature, Importance = xgb_adv_top10$Gain)
+xgb_adv_df_freq <- data.frame(Feature = xgb_adv_top10$Feature, Importance = xgb_adv_top10$Frequency)
 
 # Ridge plot
 ggplot(ridge_df, aes(x = reorder(Feature, Importance), y = Importance)) +
@@ -760,19 +764,35 @@ ggplot(enet_adj_df, aes(x = reorder(Feature, Importance), y = Importance)) +
   theme_bw() + 
   theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
-# Simple XGBoost plot
-ggplot(xgb_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+# Simple XGBoost Gain plot
+ggplot(xgb_df_gain, aes(x = reorder(Feature, Importance), y = Importance)) +
   geom_bar(stat = "identity", fill = "#D8A1D6", color = "black", linewidth = 0.3) +  # Pastel purple with black outline
   coord_flip() +
-  labs(title = "Top 10 XGBoost Feature Importances", x = "Feature", y = "Importance") +
+  labs(title = "Top 10 XGBoost Feature Importances (Gain)", x = "Feature", y = "Importance (Gain)") +
   theme_bw() + 
   theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
-# Advanced XGBoost plot
-ggplot(xgb_adv_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+# Simple XGBoost Frequency plot
+ggplot(xgb_df_freq, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "#D8A1D6", color = "black", linewidth = 0.3) +  # Pastel purple with black outline
+  coord_flip() +
+  labs(title = "Top 10 XGBoost Feature Importances (Frequency)", x = "Feature", y = "Importance (Frequency)") +
+  theme_bw() + 
+  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
+
+# Advanced XGBoost Gain plot
+ggplot(xgb_adv_df_gain, aes(x = reorder(Feature, Importance), y = Importance)) +
   geom_bar(stat = "identity", fill = "#F6A5A5", color = "black", linewidth = 0.3) +  # Pastel red with black outline
   coord_flip() +
-  labs(title = "Top 10 Advanced XGBoost Feature Importances", x = "Feature", y = "Importance") +
+  labs(title = "Top 10 Advanced XGBoost Feature Importances (Gain)", x = "Feature", y = "Importance (Gain)") +
+  theme_bw() + 
+  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
+
+# Advanced XGBoost Frequency plot
+ggplot(xgb_adv_df_freq, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "#F6A5A5", color = "black", linewidth = 0.3) +  # Pastel red with black outline
+  coord_flip() +
+  labs(title = "Top 10 Advanced XGBoost Feature Importances (Frequency)", x = "Feature", y = "Importance (Frequency)") +
   theme_bw() + 
   theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
@@ -783,7 +803,9 @@ list(
   Lasso_Top_10 = lasso_df,
   Elastic_Net_Top_10 = enet_df,
   Elastic_Net_Adjusted_Top_10 = enet_adj_df,
-  XGBoost_Top_10 = xgb_df,
-  Advanced_XGBoost_Top_10 = xgb_adv_df
+  XGBoost_Top_10_Gain = xgb_df_gain,
+  XGBoost_Top_10_Frequency = xgb_df_freq,
+  Advanced_XGBoost_Top_10_Gain = xgb_adv_df_gain,
+  Advanced_XGBoost_Top_10_Frequency = xgb_adv_df_freq
 )
 
