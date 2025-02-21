@@ -258,14 +258,23 @@ ridgemod <- cv.glmnet(Xtr, Ytr,
 
 # Plot the binomial deviance for different values of lambda
 plot(ridgemod, main = "Ridge Model Tuning")
+
+# Obtain the best lambda
 ridgemod$lambda.min
 
 # Train a lasso model with alpha = 1 (default)
 lassomod <- cv.glmnet(Xtr, Ytr,
                       family = "binomial")
-plot(lassomod, main = "Lasso tuning")
+plot(lassomod, main = "Lasso tuning")  
+abline(v = log(lassomod$lambda.min), col = "blue", lty = 2)  
+abline(v = log(lassomod$lambda.1se), col = "red", lty = 2)  
+text(log(lassomod$lambda.min), max(lassomod$cvm), "Min log-loss", pos = 4, col = "blue")  
+text(log(lassomod$lambda.1se), max(lassomod$cvm), "1se", pos = 4, col = "red")  
 
-lassomod$lambda.min
+
+# Obtain the best lambda, and most regularised one
+(lassomod$lambda.min)
+(lassomod$lambda.1se)
 
 # Train an elastic net model with alpha in [0,1]
 enetmod <- train(death ~ .,
@@ -316,6 +325,45 @@ dattr_down <- downSample(x = dattr[, -which(names(dattr) == "death")], y = dattr
 
 # Explore balance
 summary(dattr_down$death) # Same number in each group
+
+#### Plot the death distribution for the original and upsampled data
+
+# Calculate death percentages for original training set
+death_summary_tr <- dattr %>%
+  count(death) %>%
+  mutate(percent = 100 * n / sum(n))
+
+# Calculate death percentages for upsampled training set
+death_summary_bal <- dattr_balanced %>%
+  count(death) %>%
+  mutate(percent = 100 * n / sum(n))
+
+# Plot for original training data
+p1 <- ggplot(death_summary_tr, aes(x = death, y = n, fill = death)) +
+  geom_bar(stat = "identity", color = "black", linewidth = 0.3) +
+  geom_text(aes(label = paste0(round(percent, 1), "%")), 
+            vjust = -0.3, size = 5, color = "black") +
+  scale_fill_manual(values = c("Died" = "salmon", "Survived" = "lightblue")) +
+  labs(title = "Death Outcome Distribution (Original)", y = "Count", x = NULL) +
+  theme_bw() +
+  theme(plot.margin = margin(10, 10, 20, 10), legend.position = "none") +
+  coord_cartesian(ylim = c(0, max(death_summary_tr$n) * 1.03))
+
+# Plot for upsampled training data
+p2 <- ggplot(death_summary_bal, aes(x = death, y = n, fill = death)) +
+  geom_bar(stat = "identity", color = "black", linewidth = 0.3) +
+  geom_text(aes(label = paste0(round(percent, 1), "%")), 
+            vjust = -0.3, size = 5, color = "black") +
+  scale_fill_manual(values = c("Died" = "salmon", "Survived" = "lightblue")) +
+  labs(title = "Death Outcome Distribution (Upsampled)", y = "Count", x = NULL) +
+  theme_bw() +
+  theme(plot.margin = margin(10, 10, 20, 10), legend.position = "none") +
+  coord_cartesian(ylim = c(0, max(death_summary_bal$n) * 1.03))
+
+# Compare both plots now
+grid.arrange(p1, p2, ncol = 2)
+
+###
 
 # Scale and center continuous variables
 continuous_vars <- c("age", "delay", "sbp")
