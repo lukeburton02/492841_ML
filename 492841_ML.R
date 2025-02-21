@@ -502,9 +502,22 @@ xgcv_adv <- xgb.cv(
 (nrounds_best_adv <- which.max(unlist(xgcv_adv$evaluation_log[,"test_auc_mean"])))  # Step at which best AUC was achieved
 
 # Plot AUC by iteration for the advanced model
-plot(test_auc_mean ~ iter, data = xgcv_adv$evaluation_log, col = "darkgreen", 
-     type = "b", pch = 16, ylab = "Test AUC", xlab = "Iteration") +
-  abline(v = nrounds_best_adv, lty = 2)
+ggplot(xgcv_adv$evaluation_log, aes(x = iter, y = test_auc_mean)) +
+  geom_line(color = "darkgreen", size = 1) +  # Line plot for AUC
+  geom_point(color = "darkgreen", size = 2) +  # Points on the line
+  geom_vline(xintercept = nrounds_best_adv, linetype = "dashed", color = "red") +  # Vertical line at best iteration
+  labs(title = "AUC by Iteration", x = "Iteration", y = "Validation AUC") +  # Labels
+  theme_bw() +  # Consistent theme
+  theme(plot.margin = margin(10, 10, 20, 10))  # Adjust margin for better spacing
+
+# Training vs Validation AUC for the advanced model
+ggplot(xgcv_adv$evaluation_log, aes(x = iter)) +
+  geom_line(aes(y = train_auc_mean), color = "blue", size = 1) +  # Training AUC
+  geom_line(aes(y = test_auc_mean), color = "darkgreen", size = 1) +  # Validation AUC
+  labs(title = "Training vs Validation AUC", x = "Iteration", y = "AUC") +  # Labels
+  theme_bw() +  # Consistent theme
+  theme(plot.margin = margin(10, 10, 20, 10))  # Adjust margin for better spacing
+
 
 # Convert the balanced training data to DMatrix format
 Xtrain_adv <- model.matrix(death ~ . - 1, dattr_balanced)
@@ -646,7 +659,7 @@ colnames(results_df)[colnames(results_df) == "Balanced_Acc"] <- "Balanced Accura
 
 # View the evaluation dataframe for each model
 print(results_df)
-View(results_df)
+View(results_df[c(5,6),])
 
 
 # Produce the ROC curve for each model
