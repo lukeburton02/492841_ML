@@ -730,45 +730,52 @@ xgb_adv_df <- data.frame(Feature = xgb_adv_top10$Feature, Importance = xgb_adv_t
 
 # Ridge plot
 ggplot(ridge_df, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "green") +
+  geom_bar(stat = "identity", fill = "#A3D9A5", color = "black", linewidth = 0.3) +  # Pastel green with black outline
   coord_flip() +
   labs(title = "Top 10 Ridge Feature Importances", x = "Feature", y = "Importance") +
-  theme_minimal()
+  theme_bw() + 
+  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
 # Lasso plot
 ggplot(lasso_df, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_bar(stat = "identity", fill = "#A3B9D7", color = "black", linewidth = 0.3) +  # Pastel blue with black outline
   coord_flip() +
   labs(title = "Top 10 Lasso Feature Importances", x = "Feature", y = "Importance") +
-  theme_minimal()
+  theme_bw() + 
+  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
 # Elastic Net plot
 ggplot(enet_df, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "orange") +
+  geom_bar(stat = "identity", fill = "#F7C57F", color = "black", linewidth = 0.3) +  # Pastel orange with black outline
   coord_flip() +
   labs(title = "Top 10 Elastic Net Feature Importances", x = "Feature", y = "Importance") +
-  theme_minimal()
+  theme_bw() + 
+  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
 # Adjusted Elastic Net plot
 ggplot(enet_adj_df, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "orange") +
+  geom_bar(stat = "identity", fill = "#F7C57F", color = "black", linewidth = 0.3) +  # Pastel orange with black outline
   coord_flip() +
   labs(title = "Top 10 Adjusted Elastic Net Feature Importances", x = "Feature", y = "Importance") +
-  theme_minimal()
+  theme_bw() + 
+  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
 # Simple XGBoost plot
 ggplot(xgb_df, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "purple") +
+  geom_bar(stat = "identity", fill = "#D8A1D6", color = "black", linewidth = 0.3) +  # Pastel purple with black outline
   coord_flip() +
   labs(title = "Top 10 XGBoost Feature Importances", x = "Feature", y = "Importance") +
-  theme_minimal()
+  theme_bw() + 
+  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
 
 # Advanced XGBoost plot
 ggplot(xgb_adv_df, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "red") +
+  geom_bar(stat = "identity", fill = "#F6A5A5", color = "black", linewidth = 0.3) +  # Pastel red with black outline
   coord_flip() +
   labs(title = "Top 10 Advanced XGBoost Feature Importances", x = "Feature", y = "Importance") +
-  theme_minimal()
+  theme_bw() + 
+  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
+
 
 # Print top 10 features for each model in a table
 list(
