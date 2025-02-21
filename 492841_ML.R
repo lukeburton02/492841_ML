@@ -33,10 +33,14 @@ library(gridExtra)
 library(forcats) # For ordering bar plots
 library(reshape2)
 library(vcd)  # For assocstats() to compute Cramér's V
+library(patchwork)  # For combining plots
 
 # Read in the dataset. Empty rows are ommitted by default
 dat <- read.csv("assignment2025.csv")
-summary(dat)
+
+# In case empty rows are not omitted
+na.omit(dat)
+
 # View the first 5 rows
 head(dat, 5)
 
@@ -55,6 +59,7 @@ dat$death <- factor(dat$death, levels = c(0, 1), labels = c("Survived", "Died"))
 # Section 1: Exploratory data analysis
 # ------------------------------------
 
+# Summarise each variable
 summary(dat)
 
 # Explore death rate by subtype
@@ -99,19 +104,19 @@ boxplot_theme <- theme_bw() +
   )
 
 p1 <- ggplot(dat, aes(x = death, y = delay, fill = death)) +
-  geom_boxplot(outlier.shape = NA, color = "black") +
+  geom_boxplot(outlier.shape = 16, outlier.size = 1, color = "black") +
   scale_fill_manual(values = fill_colors) +
   labs(title = "Delay (hours)", y = "Delay Time") +
   boxplot_theme
 
 p2 <- ggplot(dat, aes(x = death, y = age, fill = death)) +
-  geom_boxplot(outlier.shape = NA, color = "black") +
+  geom_boxplot(outlier.shape = 16, outlier.size = 1, color = "black") +
   scale_fill_manual(values = fill_colors) +
   labs(title = "Age (years)", y = "Age") +
   boxplot_theme
 
 p3 <- ggplot(dat, aes(x = death, y = sbp, fill = death)) +
-  geom_boxplot(outlier.shape = NA, color = "black") +
+  geom_boxplot(outlier.shape = 16, outlier.size = 1, color = "black") +
   scale_fill_manual(values = fill_colors) +
   labs(title = "Systolic BP", y = "Systolic BP") +
   boxplot_theme
@@ -122,44 +127,6 @@ grid.arrange(
   ncol = 2,
   widths = c(4, 0.8)  # Reduce width ratio to tighten space
 )
-
-
-# Bar plots for categorical variables by death outcome
-cat_summary <- dat %>%
-  select(all_of(categorical_cols), death) %>%
-  select(-starts_with("symptom")) %>%
-  group_by(death) %>%
-  summarise(across(everything(), ~paste0(sum(. == levels(.)[2]), " (", round(mean(. == levels(.)[2]) * 100, 1), "%)"))) %>%
-  pivot_longer(-death, names_to = "Variable", values_to = "Count (%)")
-
-print(cat_summary)  # Display summary table
-
-cat_summary <- dat %>%
-  select(all_of(categorical_cols), death) %>%
-  select(-starts_with("symptom")) %>%
-  group_by(death) %>%
-  summarise(across(everything(), ~sum(. == levels(.)[2]))) %>%
-  pivot_longer(-death, names_to = "Variable", values_to = "Count") %>%
-  pivot_wider(names_from = death, values_from = Count)
-colnames(cat_summary) <- c("Variable", "Survived", "Died")
-print(cat_summary)
-
-# Correlation analysis on binary and numerical columns
-numeric_cols <- c("age", "sbp", "delay")
-binary_cats <- categorical_cols[sapply(dat[categorical_cols], function(x) length(unique(x)) == 2)]
-selected_vars <- c(numeric_cols, binary_cats)
-
-# Convert binary categorical variables to numeric for correlation
-dat_corr <- dat %>% select(all_of(selected_vars)) %>% mutate(across(all_of(binary_cats), as.numeric))
-dat_corr$death <- as.numeric(dat$death)  # Convert death to numeric
-
-# Compute correlation matrix
-cor_matrix <- cor(dat_corr, use = "complete.obs")
-cor_values <- data.frame(Variable = rownames(cor_matrix)[-ncol(cor_matrix)], 
-                         Correlation = round(cor_matrix[-ncol(cor_matrix), "death"], 3))
-cor_values <- cor_values[order(abs(cor_values$Correlation), decreasing = TRUE), ]  # Sort by absolute correlation
-
-print(cor_values)  # Display correlation table
 
 
 # Use as stacked bar plot to compare death rate by symptom
@@ -189,6 +156,8 @@ cramers_v <- function(x, y) {
   return(stat$cramer)
 }
 
+# Retrieve all categorical columns, including death
+categorical_cols <- names(dat)[sapply(dat, function(x) is.character(x) | is.factor(x))]
 # Create an empty correlation matrix
 n <- length(categorical_cols)
 cat_corr_matrix <- matrix(NA, nrow = n, ncol = n, dimnames = list(categorical_cols, categorical_cols))
@@ -219,6 +188,39 @@ ggplot(corr_melted, aes(x = Var1, y = Var2, fill = value)) +
     panel.grid = element_blank()  # No gridlines for a cleaner look
   ) +
   coord_fixed()  # Ensures a perfect square layout
+
+
+
+# Compute death rate for treat1
+death_treat1 <- dat %>%
+  group_by(treat1) %>%
+  summarise(drate = mean(death == "Died") * 100)
+
+# Compute death rate for treat2
+death_treat2 <- dat %>%
+  group_by(treat2) %>%
+  summarise(drate = mean(death == "Died") * 100)
+
+# Create bar plot for treatment 1
+plot1 <- ggplot(death_treat1, aes(x = treat1, y = drate, fill = treat1)) +
+  geom_bar(stat = "identity", color = "black") +
+  geom_hline(yintercept = 4.7, linetype = "dashed", color = "black", size = 1) +
+  labs(title = "Death Rate by Treatment 1", x = "Treatment 1", y = "Death Rate (%)") +
+  scale_fill_manual(values = c("L" = "#6495ED", "M" = "#FFA07A", "N" = "#D22B2B")) +  # Blue, Salmon, Red
+  theme_bw() +
+  theme(legend.position = "none")
+
+# Create bar plot for treatment 2
+plot2 <- ggplot(death_treat2, aes(x = treat2, y = drate, fill = treat2)) +
+  geom_bar(stat = "identity", color = "black") +
+  geom_hline(yintercept = 4.7, linetype = "dashed", color = "black", size = 1) +
+  labs(title = "Death Rate by Treatment 2", x = "Treatment 2", y = "Death Rate (%)") +
+  scale_fill_manual(values = c("Y" = "#6495ED", "N" = "#D22B2B")) +  # Blue, Red
+  theme_bw() +
+  theme(legend.position = "none")
+
+# Combine the two plots side by side
+plot1 + plot2
 
 
 
