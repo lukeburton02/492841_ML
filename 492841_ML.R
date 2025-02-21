@@ -18,6 +18,7 @@ setwd("C:/Users/lukeb/Downloads/LSHTM/TERM 2/Machine Learning/ML assessment/4928
 # Import relevant libraries
 install.packages("mboost")
 install.packages("GGally")
+install.packages("vcd")
 library(tidyverse)
 library(dplyr)
 library(ggplot2)
@@ -30,7 +31,8 @@ library(ggcorrplot)
 library(GGally)
 library(gridExtra)
 library(forcats) # For ordering bar plots
-
+library(reshape2)
+library(vcd)  # For assocstats() to compute Cramér's V
 
 # Read in the dataset. Empty rows are ommitted by default
 dat <- read.csv("assignment2025.csv")
@@ -62,7 +64,8 @@ death_rate <- dat %>%
 
 ggplot(death_rate, aes(x = fct_reorder(subtype, drate), y = drate)) +
   geom_bar(stat = "identity", fill = "steelblue", color = "black") +
-  labs(x = "Stroke Subtype", y = "Percentage Who Died (%)", title = "Death Rate by Stroke Subtype") +
+  geom_hline(yintercept = 4.7, linetype = "dashed", color = "black", size = 1) +
+  labs(x = "Stroke Subtype", y = "Death Rate (%)", title = "Death Rate by Stroke Subtype") +
   theme_minimal() +
   theme_bw()
 
@@ -164,6 +167,7 @@ symptom_vars <- grep("^symptom", names(dat), value = TRUE)
 symptom_death <- dat %>%
   pivot_longer(cols = all_of(symptom_vars), names_to = "Symptom", values_to = "Present") %>%
   filter(Present == "Y") %>%
+  mutate(Symptom = gsub("^symptom", "", Symptom)) %>%
   group_by(Symptom) %>%
   summarise(DeathRate = mean(death == "Died") * 100)
 
@@ -171,8 +175,52 @@ ggplot(symptom_death, aes(x = reorder(Symptom, DeathRate), y = DeathRate, fill =
   geom_col() +
   coord_flip() +
   labs(title = "Death Rate by Symptom", y = "Death Rate (%)", x = "Symptom") +
-  scale_fill_gradient(name = "Rate (%)", low = "blue", high = "red") +
-  theme_bw()
+    scale_fill_gradient(guide = "none", low = "#6495ED", high = "#D22B2B") +  # Soft pastel blue to red
+  geom_hline(yintercept = 4.7, linetype = "dashed", color = "black", size = 1) +  # Dashed vertical line at 4.7%
+  theme_bw() +
+  theme(plot.margin = margin(10, 10, 20, 10))
+
+
+
+# Function to compute Cramér's V
+cramers_v <- function(x, y) {
+  tbl <- table(x, y)
+  stat <- suppressWarnings(assocstats(tbl))  # Ignore warnings for small tables
+  return(stat$cramer)
+}
+
+# Create an empty correlation matrix
+n <- length(categorical_cols)
+cat_corr_matrix <- matrix(NA, nrow = n, ncol = n, dimnames = list(categorical_cols, categorical_cols))
+
+# Compute pairwise Cramér's V
+for (i in seq_along(categorical_cols)) {
+  for (j in seq_along(categorical_cols)) {
+    if (i == j) {
+      cat_corr_matrix[i, j] <- 1  # Perfect correlation on the diagonal
+    } else {
+      cat_corr_matrix[i, j] <- cramers_v(dat[[categorical_cols[i]]], dat[[categorical_cols[j]]])
+    }
+  }
+}
+
+# Convert matrix to long format for ggplot
+corr_melted <- melt(cat_corr_matrix)
+
+# Create square heatmap
+ggplot(corr_melted, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +  
+  scale_fill_gradient2(low = "#6495ED", mid = "white", high = "#D22B2B", midpoint = 0.5, name = "Cramér's V") +
+  labs(title = "Categorical Variable Correlation Heatmap", x = "", y = "") +
+  theme_bw() +  # Consistent with theme_bw()
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
+    plot.margin = margin(10, 10, 20, 10),  # Consistent margin
+    panel.grid = element_blank()  # No gridlines for a cleaner look
+  ) +
+  coord_fixed()  # Ensures a perfect square layout
+
+
 
 # ------------------------------------
 # Split into training + validation
