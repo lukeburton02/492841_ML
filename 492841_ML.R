@@ -415,13 +415,54 @@ xgcv <- xgb.cv(data = xgtrain, nrounds = 500, nfold = 10,
 (auc_best <- max(xgcv$evaluation_log[,"test_auc_mean"])) # Best AUC
 (nrounds_best <- which.max(unlist(xgcv$evaluation_log[,"test_auc_mean"]))) # Step at which this was achieved
 
+# Plot training vs testing AUC
+ggplot(xgcv$evaluation_log, aes(x = iter)) +
+  geom_line(aes(y = train_auc_mean), color = "blue", size = 1) +
+  geom_line(aes(y = test_auc_mean), color = "darkgreen", size = 1) +
+  labs(title = "Training vs Validation AUC", x = "Iteration", y = "AUC") +
+  theme_bw() +
+  theme(plot.margin = margin(10, 10, 20, 10))
+
 # Plot AUC by iteration
-plot(test_auc_mean ~ iter, data = xgcv$evaluation_log, col = "darkgreen", 
-     type = "b", pch = 16, ylab = "Test AUC", xlab = "Iteration") +
-  abline(v = nrounds_best, lty = 2)
+ggplot(xgcv$evaluation_log, aes(x = iter, y = test_auc_mean)) +
+  geom_line(color = "darkgreen", size = 1) +  # Line plot for AUC
+  geom_point(color = "darkgreen", size = 1) +  # Points on the line
+  geom_vline(xintercept = nrounds_best, linetype = "dashed", color = "red") +  # Vertical line at best iteration
+  labs(title = "AUC by Iteration", x = "Iteration", y = "Validation AUC") +  # Labels
+  theme_bw() +  # Consistent theme
+  theme(plot.margin = margin(10, 10, 20, 10))  # Adjust margin for better spacing
 
 # Fit final basic model with best parameters
 xgbmod <- xgb.train(data = xgtrain, nrounds = nrounds_best, params = params)
+
+# Generate confusion matrix
+# IMPORTANT: this code takes the first factor, Survived, as the positive class
+# Therefore the sensitivity and specificity returned here should be reversed
+# In the table further below, I simply relabel these columns to account for this
+probs <- predict(xgbmod, Xte)
+roc_curve <- roc(Yte, probs)
+best_index <- which.max(roc_curve$sensitivities + roc_curve$specificities - 1)
+xgb_thd <- roc_curve$thresholds[best_index]
+pred_labels <- factor(ifelse(probs > xgb_thd, "Died", "Survived"), 
+                      levels = c("Survived", "Died"))
+confusion <- confusionMatrix(pred_labels, Yte)
+
+# Convert confusion matrix to a data frame
+confusion_table <- as.data.frame(as.table(confusion$table))
+
+# Ensure the factor levels are in the correct order
+confusion_table$Prediction <- factor(confusion_table$Prediction, levels = c("Survived", "Died"))
+confusion_table$Reference <- factor(confusion_table$Reference, levels = c("Survived", "Died"))
+
+# Plot confusion matrix
+ggplot(confusion_table, aes(x = Prediction, y = Reference, fill = Freq)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "lightblue", high = "salmon") +  # Light blue to salmon gradient
+  geom_text(aes(label = Freq), color = "black", size = 5) +  # Add frequency text in each cell
+  labs(title = "Confusion Matrix", x = "Predicted", y = "Actual") +
+  theme_bw() +
+  theme(plot.margin = margin(10, 10, 20, 10)) +
+  scale_y_discrete(limits = rev(levels(confusion_table$Reference)))  # Flip the y-axis
 
 
 
@@ -589,11 +630,13 @@ xgb_eval <- evaluate_model("XGBoost", xgb_prob, Yte)
 xgb_eval_adv <- evaluate_model("Advanced XGBoost", xgb_prob_adv, Yte)
 
 # Print table of results
+# IMPORTANT: confusion matrix took Survived as the positive class
+# Therefore, I have switched the labels of sensitivity and specificity
 results_df <- data.frame(
   Model = c("Ridge", "Lasso", "Elastic Net", "Adjusted Elastic Net", "XGBoost", "Advanced XGBoost"),
   AUC = round(c(ridge_eval$auc, lasso_eval$auc, enet_eval$auc, enet_eval_adj$auc, xgb_eval$auc, xgb_eval_adv$auc), 3),
-  Sensitivity = round(c(ridge_eval$sensitivity, lasso_eval$sensitivity, enet_eval$sensitivity, enet_eval_adj$sensitivity, xgb_eval$sensitivity, xgb_eval_adv$sensitivity), 3),
-  Specificity = round(c(ridge_eval$specificity, lasso_eval$specificity, enet_eval$specificity, enet_eval_adj$specificity, xgb_eval$specificity, xgb_eval_adv$specificity), 3),
+  Specificity = round(c(ridge_eval$sensitivity, lasso_eval$sensitivity, enet_eval$sensitivity, enet_eval_adj$sensitivity, xgb_eval$sensitivity, xgb_eval_adv$sensitivity), 3),
+  Sensitivity = round(c(ridge_eval$specificity, lasso_eval$specificity, enet_eval$specificity, enet_eval_adj$specificity, xgb_eval$specificity, xgb_eval_adv$specificity), 3),
   F1 = round(c(ridge_eval$f1_score, lasso_eval$f1_score, enet_eval$f1_score, enet_eval_adj$f1_score, xgb_eval$f1_score, xgb_eval_adv$f1_score), 3),
   Balanced_Acc = paste0(round(c(ridge_eval$balanced_accuracy, lasso_eval$balanced_accuracy, enet_eval$balanced_accuracy, enet_eval_adj$balanced_accuracy, xgb_eval$balanced_accuracy, xgb_eval_adv$balanced_accuracy) *100, 2), "%"),
   Threshold = round(c(ridge_eval$threshold, lasso_eval$threshold, enet_eval$threshold, enet_eval_adj$threshold, xgb_eval$threshold, xgb_eval_adv$threshold), 3)
