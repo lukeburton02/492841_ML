@@ -1,7 +1,7 @@
 # ML assessment. Candidate number: 492841
 
 # Set your working directory
-setwd("C:/Users/lukeb/Downloads/LSHTM/TERM 2/Machine Learning/ML assessment/492841_ML")
+setwd("~")
 
 
 # ------------------------------------
@@ -12,6 +12,7 @@ setwd("C:/Users/lukeb/Downloads/LSHTM/TERM 2/Machine Learning/ML assessment/4928
 # - Train each regularised regression model
 # - Train each tree-based model
 # - Evaluate and compare each model
+# Runtime should be 5-10 minutes
 # ------------------------------------
 
 
@@ -322,7 +323,7 @@ plot(enetmod, xTrans = log10)
 # After constructing the previous models, we will adjust the elastic net model
 # This is done through adjusting the death balance of the dataset
 # We also centre and scale continuous variables to avoid bias based on variable ranges
-set.seed(42)
+set.seed(42) # For reproducibility
 dattr_balanced <- upSample(x = dattr[, -which(names(dattr) == "death")], y = dattr$death) %>%
   rename(death = Class)
 
@@ -637,7 +638,7 @@ evaluate_model <- function(mod_name, probs, true_vals) {
   recall <- cm$byClass["Sensitivity"]
   f1_score <- 2 * (precision * recall) / (precision + recall)
   
-  # Calculate Balanced Accuracy
+  # Calculate balanced accuracy
   balanced_accuracy <- (cm$byClass["Sensitivity"] + cm$byClass["Specificity"]) / 2
   
   # Extract relevant metrics
@@ -707,7 +708,7 @@ plot_roc_curve("Advanced XGBoost", xgb_prob_adv, Yte)
 
 # Explore and compare feature importance from each model
 # 1. Ridge
-ridge_imp <- coef(ridgemod)[-1,]  # Removing the intercept
+ridge_imp <- coef(ridgemod)[-1,]  # Removing the intercept as this doesn't relate to any specific feature
 ridge_imp <- abs(ridge_imp)  # Taking absolute value to measure importance
 
 # 2. Lasso
@@ -754,7 +755,7 @@ xgb_adv_df_freq <- data.frame(Feature = xgb_adv_top10$Feature, Importance = xgb_
 
 # Ridge plot
 ggplot(ridge_df, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "#A3D9A5", color = "black", linewidth = 0.3) +  # Pastel green with black outline
+  geom_bar(stat = "identity", fill = "#A3D9A5", color = "black", linewidth = 0.3) +  
   coord_flip() +
   labs(title = "Top 10 Ridge Feature Importances", x = "Feature", y = "Importance (abs)") +
   theme_bw() + 
@@ -762,7 +763,7 @@ ggplot(ridge_df, aes(x = reorder(Feature, Importance), y = Importance)) +
 
 # Lasso plot
 ggplot(lasso_df, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "#A3B9D7", color = "black", linewidth = 0.3) +  # Pastel blue with black outline
+  geom_bar(stat = "identity", fill = "#A3B9D7", color = "black", linewidth = 0.3) +  
   coord_flip() +
   labs(title = "Top 10 Lasso Feature Importances", x = "Feature", y = "Importance (abs)") +
   theme_bw() + 
@@ -770,54 +771,54 @@ ggplot(lasso_df, aes(x = reorder(Feature, Importance), y = Importance)) +
 
 # Elastic Net plot
 ggplot(enet_df, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "#F7C57F", color = "black", linewidth = 0.3) +  # Pastel orange with black outline
+  geom_bar(stat = "identity", fill = "#F7C57F", color = "black", linewidth = 0.3) +  
   coord_flip() +
   labs(title = "Top 10 Elastic Net Feature Importances", x = "Feature", y = "Importance (abs)") +
   theme_bw() + 
-  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
+  theme(plot.margin = margin(10, 10, 20, 10))  
 
 # Adjusted Elastic Net plot
 ggplot(enet_adj_df, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "#F7C57F", color = "black", linewidth = 0.3) +  # Pastel orange with black outline
+  geom_bar(stat = "identity", fill = "#F7C57F", color = "black", linewidth = 0.3) +  
   coord_flip() +
   labs(title = "Top 10 Adjusted Elastic Net Feature Importances", x = "Feature", y = "Importance (abs)") +
   theme_bw() + 
-  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
+  theme(plot.margin = margin(10, 10, 20, 10))  
 
 # Simple XGBoost Gain plot
 ggplot(xgb_df_gain, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "#D97D7D", color = "black", linewidth = 0.3) +  # Pastel purple with black outline
+  geom_bar(stat = "identity", fill = "#D97D7D", color = "black", linewidth = 0.3) +  
   coord_flip() +
   labs(title = "Top 10 XGBoost Feature Importances", x = "Feature", y = "Importance (Gain)") +
   theme_bw() + 
-  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
+  theme(plot.margin = margin(10, 10, 20, 10))  
 
 # Simple XGBoost Frequency plot
 ggplot(xgb_df_freq, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "#D8A1D6", color = "black", linewidth = 0.3) +  # Pastel purple with black outline
+  geom_bar(stat = "identity", fill = "#D8A1D6", color = "black", linewidth = 0.3) +  
   coord_flip() +
   labs(title = "Top 10 XGBoost Feature Importances", x = "Feature", y = "Importance (Frequency)") +
   theme_bw() + 
-  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
+  theme(plot.margin = margin(10, 10, 20, 10))  
 
 # Advanced XGBoost Gain plot
 ggplot(xgb_adv_df_gain, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "#F6A5A5", color = "black", linewidth = 0.3) +  # Pastel red with black outline
+  geom_bar(stat = "identity", fill = "#F6A5A5", color = "black", linewidth = 0.3) +  
   coord_flip() +
   labs(title = "Top 10 Advanced XGBoost Feature Importances (Gain)", x = "Feature", y = "Importance (Gain)") +
   theme_bw() + 
-  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
+  theme(plot.margin = margin(10, 10, 20, 10))  
 
 # Advanced XGBoost Frequency plot
 ggplot(xgb_adv_df_freq, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_bar(stat = "identity", fill = "#F6A5A5", color = "black", linewidth = 0.3) +  # Pastel red with black outline
+  geom_bar(stat = "identity", fill = "#F6A5A5", color = "black", linewidth = 0.3) +  
   coord_flip() +
   labs(title = "Top 10 Advanced XGBoost Feature Importances (Frequency)", x = "Feature", y = "Importance (Frequency)") +
   theme_bw() + 
-  theme(plot.margin = margin(10, 10, 20, 10))  # Adjusted margin for spacing
+  theme(plot.margin = margin(10, 10, 20, 10))  
 
 
-# Print top 10 features for each model in a table
+# Enter the top 10 features for each model into a table
 list(
   Ridge_Top_10 = ridge_df,
   Lasso_Top_10 = lasso_df,
